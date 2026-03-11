@@ -1,0 +1,152 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+    // ==========================================
+    // --- 1. HELPER FUNCTIONS ---
+    // ==========================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isDeveloper() {
+      return isAuthenticated() && 
+        request.auth.token.email != null && 
+        (request.auth.token.email.toLower() == 'campusbridgeofficials@gmail.com' || 
+         request.auth.token.email == 'campusbridgeofficials@gmail.com');
+    }
+
+    function getUserData() {
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(path) ? get(path).data : null;
+    }
+
+    function isManagement() {
+      return isAuthenticated() && (
+        isDeveloper() || 
+        (getUserData() != null && getUserData().get('role', '').toLower() == 'management')
+      );
+    }
+    
+    function isFaculty() {
+      return isAuthenticated() && (
+        getUserData() != null && getUserData().get('role', '').toLower() == 'faculty'
+      );
+    }
+    
+    function isStudent() {
+      return isAuthenticated() && (
+        getUserData() != null && getUserData().get('role', '').toLower() == 'student'
+      );
+    }
+
+    // ==========================================
+    // --- 2. COLLECTION RULES ---
+    // ==========================================
+
+    // USERS: Public read. Users create their own.
+    // Users can update themselves, OR Management can update them (for approvals).
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isManagement());
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isDeveloper());
+    }
+
+    // STUDENT IDs (Verification)
+    match /studentIds/{studentId} {
+      allow read, create: if isAuthenticated();
+      allow delete: if isAuthenticated() && (resource.data.uid == request.auth.uid || isDeveloper());
+      allow update: if false; 
+    }
+    
+    // COMPLAINTS: Public read. Anyone logged in can create/update. Developer deletes.
+    match /complaints/{complaintId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated(); 
+      allow delete: if isManagement() || resource.data.uid == request.auth.uid; 
+    }
+    
+    // DEPARTMENT CAPACITY: Public read. Logged in users update (to book tickets). 
+    // Only Management can create or delete a whole department.
+    match /departmentCapacity/{deptId} {
+      allow read: if true;
+      allow update: if isAuthenticated(); 
+      allow create, delete: if isManagement();
+    }
+
+    // DELETED CAPACITIES (Archive): Kept secure so only management touches it.
+    match /deletedCapacities/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isManagement();
+    }
+    
+    // EVENTS: Public read. Logged in users create/update. Only the Host or Dev deletes.
+    match /events/{eventId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (resource.data.hostId == request.auth.uid || isManagement());
+
+      match /feedback/{feedbackId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+    
+    // REGISTRATIONS (Tickets)
+    match /registrations/{regId} {
+      allow read, create, update: if isAuthenticated();
+      allow delete: if isManagement();
+    }
+
+    // NOTIFICATIONS
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated(); 
+    }
+
+    // NOTICES
+    match /notices/{noticeId} {
+      allow read: if true;
+      // Only authorized roles can create
+      allow create: if isDeveloper() || isManagement() || isFaculty();
+      // Updates: Author or Admin
+      allow update: if isDeveloper() || (isManagement() && resource.data.get('authorRole', '').toLower() != 'developer') || resource.data.authorUid == request.auth.uid;
+      // Delete: Developer can delete all. Management can delete non-dev notices. Faculty can only delete their own.
+      allow delete: if isDeveloper() || (isManagement() && resource.data.get('authorRole', '').toLower() != 'developer') || (isFaculty() && resource.data.authorUid == request.auth.uid);
+    }
+    
+    // ADVERTISEMENTS
+    match /advertisements/{adId} {
+      allow read: if true; // Allow public read for the popup to work reliably
+      allow write: if isManagement();
+    }
+
+    // ALUMNI CHAT
+    match /alumniChat/{messageId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if isDeveloper() || resource.data.senderId == request.auth.uid;
+    }
+
+    // POLLS
+    match /polls/{pollId} {
+      allow read: if isAuthenticated();
+      allow create: if isManagement();
+      allow update: if isAuthenticated();
+      allow delete: if isDeveloper() || resource.data.get('createdBy', '') == request.auth.uid;
+    }
+
+    // SETTINGS (Global app settings)
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isManagement();
+    }
+    
+    // ==========================================
+    // --- 3. SAFETY CATCH ---
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

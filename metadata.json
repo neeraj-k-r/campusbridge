@@ -1,0 +1,7 @@
+{
+  "name": "CampusBridge",
+  "description": "A comprehensive event management platform for colleges featuring AI-powered event generation, management approval workflows, and QR-based attendance tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

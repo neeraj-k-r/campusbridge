@@ -6,12 +6,12 @@ import admin from "firebase-admin";
 import fs from "fs";
 import webpush from 'web-push';
 import dotenv from "dotenv";
-import cors from "cors"; // Added CORS to ensure mobile apps can hit the API
+import cors from "cors";
 
 dotenv.config();
 
 webpush.setVapidDetails(
-  'mailto:campusbridgeofficials.com', // Replace with your actual email
+  'mailto:campusbridgeofficials@gmail.com',
   process.env.VAPID_PUBLIC_KEY || "YOUR_PUBLIC_KEY",
   process.env.VAPID_PRIVATE_KEY || "YOUR_PRIVATE_KEY"
 );
@@ -260,9 +260,12 @@ async function startServer() {
   } else if (distExists) {
     const distPath = path.resolve(__dirname, "../frontend/dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+
+    // 👇 THIS IS THE LINE THAT WAS FIXED 👇
+    app.get(/(.*)/, (req, res) => {
       res.sendFile(path.resolve(distPath, "index.html"));
     });
+
   } else {
     const vite = await createViteServer({
       server: { middlewareMode: true },

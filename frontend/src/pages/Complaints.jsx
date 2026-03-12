@@ -357,23 +357,25 @@ export default function Complaints({ profile }) {
         createdAt: serverTimestamp(),
       });
 
-      // Notify management AND all users (students/faculty)
-      console.log("Sending notification to management and users...");
+      // --- FIXED NOTIFICATION LOGIC ---
+      console.log("Sending notification to management...");
       let recipients = [];
+
+      // If private, only ping the faculty member. If public, ping management.
       if (selectedFacultyId) {
         recipients = [selectedFacultyId];
       } else {
-        recipients = ["role_management", "role_student", "role_faculty"];
+        recipients = ["role_management"];
       }
 
-      // Also notify the author if they are not in one of these roles (e.g. developer)
-      if (!recipients.includes(`role_${profile.role}`) && !recipients.includes(profile.uid)) {
+      // Also notify the author so it shows up in their own NotificationPanel UI
+      if (!recipients.includes(profile.uid)) {
         recipients.push(profile.uid);
       }
 
       const authorName = profile.role === "faculty" ? profile.displayName : (profile.codeName || "Anonymous");
       await sendNotification({
-        title: "New Complaint",
+        title: selectedFacultyId ? "New Private Message" : "New Anonymous Complaint",
         message: `A new complaint has been posted by ${authorName}`,
         link: `/complaints`,
         recipients: recipients,
@@ -381,6 +383,7 @@ export default function Complaints({ profile }) {
         relatedId: docRef.id
       });
       console.log("Notification sent successfully.");
+      // --- END OF FIX ---
 
       setNewComplaint("");
       setImageFile(null);

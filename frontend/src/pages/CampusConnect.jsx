@@ -9,6 +9,9 @@ import { cn } from "../lib/utils";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 
+// --- NEW IMPORT ADDED HERE ---
+import { useNotifications } from "../context/NotificationContext";
+
 const CLOUDINARY_CLOUD_NAME = "dbyraj0xm";
 const CLOUDINARY_UPLOAD_PRESET = "campus_posters";
 
@@ -107,6 +110,9 @@ export default function CampusConnect({ user, profile }) {
   const [isDeletingPoll, setIsDeletingPoll] = useState(false);
   const messagesEndRef = useRef(null);
 
+  // --- NOTIFICATION HOOK INITIALIZED HERE ---
+  const { sendNotification } = useNotifications();
+
   useEffect(() => {
     // Chat messages listener
     const qChat = query(
@@ -199,14 +205,14 @@ export default function CampusConnect({ user, profile }) {
     try {
       const poll = polls.find(p => p.id === pollId);
       const currentVote = poll?.votes?.[user.uid];
-      
+
       if (currentVote === optionIndex) return;
 
       const pollRef = doc(db, "polls", pollId);
       await updateDoc(pollRef, {
         [`votes.${user.uid}`]: optionIndex
       });
-      
+
       toast.success(currentVote !== undefined ? "Vote updated!" : "Vote cast!");
     } catch (error) {
       console.error("Error voting:", error);
@@ -329,6 +335,18 @@ export default function CampusConnect({ user, profile }) {
         senderDept: isDeveloper ? "Admin" : (profile.department || "Management"),
         createdAt: serverTimestamp()
       });
+
+      // --- NEW NOTIFICATION TRIGGER ---
+      // This alerts "all" users that a new message was posted
+      await sendNotification({
+        title: "Campus Connect",
+        message: `${profile.displayName} posted a new message in the chat.`,
+        link: "/campus-connect", // Assuming this is the route for this page
+        recipients: ["all"],
+        type: "CHAT"
+      });
+      // --- END NEW NOTIFICATION TRIGGER ---
+
       setNewMessage("");
       setImageFile(null);
       setImagePreview(null);
@@ -412,8 +430,8 @@ export default function CampusConnect({ user, profile }) {
           onClick={() => setActiveTab("chat")}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all",
-            activeTab === "chat" 
-              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" 
+            activeTab === "chat"
+              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
               : "text-zinc-500 hover:bg-zinc-50"
           )}
         >
@@ -424,8 +442,8 @@ export default function CampusConnect({ user, profile }) {
           onClick={() => setActiveTab("polls")}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all",
-            activeTab === "polls" 
-              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" 
+            activeTab === "polls"
+              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
               : "text-zinc-500 hover:bg-zinc-50"
           )}
         >
@@ -436,8 +454,8 @@ export default function CampusConnect({ user, profile }) {
           onClick={() => setActiveTab("directory")}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all",
-            activeTab === "directory" 
-              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" 
+            activeTab === "directory"
+              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
               : "text-zinc-500 hover:bg-zinc-50"
           )}
         >
@@ -496,16 +514,16 @@ export default function CampusConnect({ user, profile }) {
                         <span className={cn(
                           "text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider",
                           msg.senderEmail === "campusbridgeofficials@gmail.com" || msg.senderRole === "developer" ? "bg-indigo-100 text-indigo-700" :
-                          msg.senderRole === "alumni" ? "bg-amber-100 text-amber-700" :
-                          msg.senderRole === "faculty" ? "bg-purple-100 text-purple-700" :
-                          msg.senderRole === "management" ? "bg-red-100 text-red-700" :
-                          "bg-emerald-100 text-emerald-700"
+                            msg.senderRole === "alumni" ? "bg-amber-100 text-amber-700" :
+                              msg.senderRole === "faculty" ? "bg-purple-100 text-purple-700" :
+                                msg.senderRole === "management" ? "bg-red-100 text-red-700" :
+                                  "bg-emerald-100 text-emerald-700"
                         )}>
                           {msg.senderEmail === "campusbridgeofficials@gmail.com" ? "developer" : msg.senderRole}
                         </span>
                       </div>
                     )}
-                    
+
                     <div className="flex items-center gap-2 relative group w-full">
                       {!isMe && (isDeveloper || msg.senderId === user.uid) && (
                         <button
@@ -518,15 +536,15 @@ export default function CampusConnect({ user, profile }) {
                       )}
                       <div className={cn(
                         "px-4 py-3 rounded-2xl shadow-sm relative",
-                        isMe 
-                          ? "bg-emerald-600 text-white rounded-tr-sm ml-auto" 
+                        isMe
+                          ? "bg-emerald-600 text-white rounded-tr-sm ml-auto"
                           : "bg-white border border-zinc-200 text-zinc-800 rounded-tl-sm"
                       )}>
                         {msg.imageUrl && (
                           <div className="mb-2 rounded-xl overflow-hidden border border-white/10">
-                            <img 
-                              src={msg.imageUrl} 
-                              alt="Shared" 
+                            <img
+                              src={msg.imageUrl}
+                              alt="Shared"
                               className="max-w-full h-auto object-cover max-h-80"
                               referrerPolicy="no-referrer"
                             />
@@ -631,8 +649,8 @@ export default function CampusConnect({ user, profile }) {
               onClick={() => setActiveTab("polls")}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all",
-                activeTab === "polls" 
-                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" 
+                activeTab === "polls"
+                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
                   : "text-zinc-500 hover:bg-zinc-100"
               )}
             >
@@ -643,8 +661,8 @@ export default function CampusConnect({ user, profile }) {
               onClick={() => setActiveTab("directory")}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all",
-                activeTab === "directory" 
-                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" 
+                activeTab === "directory"
+                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
                   : "text-zinc-500 hover:bg-zinc-100"
               )}
             >
@@ -685,7 +703,7 @@ export default function CampusConnect({ user, profile }) {
                         </button>
                       )}
                       <h4 className="font-bold text-sm text-zinc-900 mb-3 pr-6">{poll.question}</h4>
-                      
+
                       <div className="space-y-2">
                         {poll.options.map((opt, idx) => {
                           const optVotes = Object.values(poll.votes || {}).filter(v => v === idx).length;
@@ -697,9 +715,9 @@ export default function CampusConnect({ user, profile }) {
                               onClick={() => handleVote(poll.id, idx)}
                               className={cn(
                                 "w-full relative h-10 rounded-lg border transition-all overflow-hidden text-left px-3",
-                                hasVoted 
-                                  ? userVote === idx 
-                                    ? "border-emerald-500 bg-emerald-50/30" 
+                                hasVoted
+                                  ? userVote === idx
+                                    ? "border-emerald-500 bg-emerald-50/30"
                                     : "border-zinc-100 bg-zinc-50/30"
                                   : "border-zinc-200 hover:border-emerald-300 hover:bg-emerald-50/30"
                               )}
@@ -754,10 +772,10 @@ export default function CampusConnect({ user, profile }) {
                     className="w-full pl-10 pr-4 py-2 bg-white border border-zinc-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   {usersList
-                    .filter(u => 
+                    .filter(u =>
                       u.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       u.role?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       u.department?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -782,10 +800,10 @@ export default function CampusConnect({ user, profile }) {
                             <span className={cn(
                               "text-[8px] px-1 py-0.5 rounded font-bold uppercase tracking-wider shrink-0",
                               u.email === "campusbridgeofficials@gmail.com" || u.role === "developer" ? "bg-indigo-100 text-indigo-700" :
-                              u.role === "alumni" ? "bg-amber-100 text-amber-700" :
-                              u.role === "faculty" ? "bg-purple-100 text-purple-700" :
-                              u.role === "management" ? "bg-red-100 text-red-700" :
-                              "bg-emerald-100 text-emerald-700"
+                                u.role === "alumni" ? "bg-amber-100 text-amber-700" :
+                                  u.role === "faculty" ? "bg-purple-100 text-purple-700" :
+                                    u.role === "management" ? "bg-red-100 text-red-700" :
+                                      "bg-emerald-100 text-emerald-700"
                             )}>
                               {u.email === "campusbridgeofficials@gmail.com" ? "developer" : u.role}
                             </span>
@@ -841,9 +859,9 @@ export default function CampusConnect({ user, profile }) {
                       onClick={() => handleVote(poll.id, idx)}
                       className={cn(
                         "w-full relative h-8 rounded-lg border transition-all overflow-hidden text-left px-3",
-                        hasVoted 
-                          ? userVote === idx 
-                            ? "border-emerald-500 bg-emerald-50/30" 
+                        hasVoted
+                          ? userVote === idx
+                            ? "border-emerald-500 bg-emerald-50/30"
                             : "border-zinc-100 bg-zinc-50/30"
                           : "border-zinc-200 hover:border-emerald-300 hover:bg-emerald-50/30"
                       )}
@@ -973,8 +991,8 @@ export default function CampusConnect({ user, profile }) {
                         onClick={() => setPollTarget(t)}
                         className={cn(
                           "py-2 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all",
-                          pollTarget === t 
-                            ? "bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-600/10" 
+                          pollTarget === t
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-600/10"
                             : "bg-white text-zinc-400 border-zinc-100 hover:border-zinc-200"
                         )}
                       >
@@ -1017,11 +1035,11 @@ export default function CampusConnect({ user, profile }) {
                     <p className="text-xs text-zinc-400">Security verification required</p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => {
                     setPollToDelete(null);
                     setDeletePassword("");
-                  }} 
+                  }}
                   className="p-2 text-zinc-400 hover:text-zinc-600 rounded-full hover:bg-zinc-100"
                 >
                   <X size={24} />
@@ -1075,7 +1093,7 @@ export default function CampusConnect({ user, profile }) {
       <AnimatePresence>
         {showCropper && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
@@ -1092,14 +1110,14 @@ export default function CampusConnect({ user, profile }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <button 
+                  <button
                     onClick={() => setRotation((prev) => (prev + 90) % 360)}
                     className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-zinc-600 hover:bg-zinc-100 rounded-xl transition-all"
                   >
                     <Sparkles size={16} className="text-amber-500" />
                     Rotate
                   </button>
-                  <button 
+                  <button
                     onClick={handleCropCancel}
                     className="p-2 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-full transition-all"
                   >

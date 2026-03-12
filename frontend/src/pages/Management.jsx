@@ -106,13 +106,16 @@ export default function Management({ profile }) {
       }
     );
 
-    const qUsers = query(collection(db, "users"), where("role", "in", ["student", "faculty", "alumni"]));
+    // FIX: Include management in directory
+    const qUsers = query(collection(db, "users"), where("role", "in", ["student", "faculty", "alumni", "management"]));
     const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
       setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
     let unsubscribeManagers = () => { };
-    if (profile?.role === "management") {
+
+    // FIX: Ensure Developer account can see pending Faculty/Managers
+    if (profile?.role === "management" || isDeveloper) {
       const qManagers = query(
         collection(db, "users"),
         where("role", "in", ["management", "faculty"]),
@@ -168,7 +171,6 @@ export default function Management({ profile }) {
       };
       reader.readAsDataURL(file);
     }
-    // Reset input so same file can be selected again
     e.target.value = "";
   };
 
@@ -222,6 +224,21 @@ export default function Management({ profile }) {
         createdBy: profile.email
       });
 
+      // --- NEW NOTIFICATION LOGIC FOR ADS ---
+      let recipients = ["all"]; // default to everyone
+      if (adTargetAudience === "student") recipients = ["role_student"];
+      if (adTargetAudience === "faculty") recipients = ["role_faculty"];
+      if (adTargetAudience === "management") recipients = ["role_management"];
+
+      await sendNotification({
+        title: `📢 ${adTitle}`,
+        message: adMessage,
+        link: adUrl || "/",
+        recipients: recipients,
+        type: "ADVERTISEMENT"
+      });
+      // --- END NOTIFICATION LOGIC ---
+
       toast.success("Advertisement created successfully!");
       setAdTitle("");
       setAdMessage("");
@@ -268,7 +285,10 @@ export default function Management({ profile }) {
     try {
       for (const cap of capacities) {
         let actualCount = 0;
-        if (cap.type === "faculty") {
+        // FIX: Legacy fallback for older faculty capacities
+        const isFacultyCap = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
+
+        if (isFacultyCap) {
           actualCount = allUsers.filter(u => u.role === "faculty" && u.department === cap.department).length;
         } else {
           actualCount = allUsers.filter(u =>
@@ -291,7 +311,6 @@ export default function Management({ profile }) {
     }
   };
 
-  // --- HELPER FOR SAFE DATE FORMATTING ---
   const safeFormatDate = (dateValue, formatStr = "MMM d, yyyy") => {
     try {
       if (!dateValue) return "Date Pending";
@@ -314,13 +333,11 @@ export default function Management({ profile }) {
 
       let registeredCount = 0;
 
-      // Check if it was deleted
       const deletedDocSnap = await getDoc(deletedDocRef);
       if (deletedDocSnap.exists()) {
         registeredCount = deletedDocSnap.data().registeredCount || 0;
-        await deleteDoc(deletedDocRef); // Remove from deleted
+        await deleteDoc(deletedDocRef);
       } else {
-        // Check if it already exists
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           registeredCount = docSnap.data().registeredCount || 0;
@@ -348,10 +365,8 @@ export default function Management({ profile }) {
     setPasswordModal(prev => ({ ...prev, loading: true, error: "" }));
 
     try {
-      // Authenticate the user with Firebase using the provided email and password
       await signInWithEmailAndPassword(auth, passwordModal.email, passwordModal.password);
 
-      // Secret is correct, proceed with action
       if (passwordModal.action === "end_batch") {
         await executeEndBatch(passwordModal.capacity);
       } else if (passwordModal.action === "delete_capacity") {
@@ -368,17 +383,14 @@ export default function Management({ profile }) {
   };
 
   const executeDeleteUser = async (userToDelete) => {
-    console.log("Executing delete user for:", userToDelete);
     if (!userToDelete?.id) {
       toast.error("User ID is missing");
       return;
     }
 
     try {
-      // 1. Delete the user document from Firestore
       await deleteDoc(doc(db, "users", userToDelete.id));
 
-      // 2. Clean up IDs so they can be reused if necessary (Safely checking roles)
       if (userToDelete.role === "student" && userToDelete.studentId) {
         await deleteDoc(doc(db, "studentIds", userToDelete.studentId));
       }
@@ -386,11 +398,9 @@ export default function Management({ profile }) {
         await deleteDoc(doc(db, "facultyIds", userToDelete.facultyId));
       }
 
-      // 3. Decrement the Active Configuration Capacity
       try {
         const isFaculty = userToDelete.role === "faculty";
         if (userToDelete.department && (isFaculty || userToDelete.yearOfJoin)) {
-          // Construct the ID for the capacity document
           const capId = isFaculty
             ? `${userToDelete.department}_FACULTY`
             : `${userToDelete.department}_${userToDelete.yearOfJoin}`;
@@ -398,7 +408,6 @@ export default function Management({ profile }) {
           const capRef = doc(db, "departmentCapacity", capId);
           const capSnap = await getDoc(capRef);
 
-          // If the capacity document exists and count > 0, decrease it by 1
           if (capSnap.exists() && capSnap.data().registeredCount > 0) {
             await updateDoc(capRef, {
               registeredCount: increment(-1)
@@ -418,22 +427,18 @@ export default function Management({ profile }) {
 
   const executeEndBatch = async (cap) => {
     try {
-      // Find all users in this capacity
       const usersToUpdate = allUsers.filter(u =>
         u.role === "student" &&
         u.department === cap.department &&
         u.yearOfJoin?.toString() === cap.yearOfJoin?.toString()
       );
 
-      // Update all users to role: "alumni"
       const updatePromises = usersToUpdate.map(u =>
         updateDoc(doc(db, "users", u.id), { role: "alumni" })
       );
       await Promise.all(updatePromises);
 
-      // Delete the capacity
       await deleteDoc(doc(db, "departmentCapacity", cap.id));
-
       toast.success(`Batch ${cap.department} ${cap.yearOfJoin} ended successfully. Users moved to Alumni.`);
     } catch (error) {
       console.error("End batch error:", error);
@@ -443,10 +448,11 @@ export default function Management({ profile }) {
 
   const executeDeleteCapacity = async (cap) => {
     try {
-      // Find all users in this capacity
-      const isFaculty = cap.type === "faculty";
+      // FIX: Legacy fallback
+      const isFacultyCap = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
+
       const usersToDelete = allUsers.filter(u => {
-        if (isFaculty) {
+        if (isFacultyCap) {
           return u.role === "faculty" && u.department === cap.department;
         }
         return u.role === "student" &&
@@ -454,7 +460,6 @@ export default function Management({ profile }) {
           u.yearOfJoin?.toString() === cap.yearOfJoin?.toString();
       });
 
-      // Delete all users from Firestore
       const deletePromises = usersToDelete.map(async (u) => {
         await deleteDoc(doc(db, "users", u.id));
         if (u.role === "student" && u.studentId) {
@@ -466,7 +471,6 @@ export default function Management({ profile }) {
       });
       await Promise.all(deletePromises);
 
-      // Delete the capacity
       await deleteDoc(doc(db, "departmentCapacity", cap.id));
 
       toast.success(`Capacity deleted and ${usersToDelete.length} users removed.`);
@@ -499,7 +503,6 @@ export default function Management({ profile }) {
     try {
       await updateDoc(doc(db, "events", eventId), { status });
 
-      // Notify the event host
       const event = pendingEvents.find(e => e.id === eventId);
       if (event) {
         if (event.hostId) {
@@ -512,9 +515,7 @@ export default function Management({ profile }) {
           });
         }
 
-        // If approved, notify all students AND management
         if (status === "approved") {
-          // Notify Students
           await sendNotification({
             title: "New Event Announced!",
             message: `"${event.title}" is now open for registration. Check it out!`,
@@ -523,7 +524,6 @@ export default function Management({ profile }) {
             type: "EVENT"
           });
 
-          // Notify Management (Self-notification for confirmation)
           await sendNotification({
             title: "Event Approved",
             message: `You successfully approved "${event.title}".`,
@@ -551,7 +551,6 @@ export default function Management({ profile }) {
 
       await updateDoc(doc(db, "users", managerId), { isApproved: true });
 
-      // Notify the user
       await sendNotification({
         title: "Account Approved",
         message: `Your ${isFaculty ? "faculty" : "management"} account has been approved. You now have full access.`,
@@ -597,7 +596,6 @@ export default function Management({ profile }) {
         rejectionReason: rejectionReason.trim()
       });
 
-      // Notify the event host
       const event = pendingEvents.find(e => e.id === selectedEventId);
       if (event && event.hostId) {
         await sendNotification({
@@ -622,7 +620,6 @@ export default function Management({ profile }) {
   };
 
   const totalCapacity = capacities.reduce((acc, curr) => acc + (curr.totalStudents || 0), 0);
-  const totalRegistered = capacities.reduce((acc, curr) => acc + (curr.registeredCount || 0), 0);
 
   if (loading) {
     return (
@@ -667,7 +664,7 @@ export default function Management({ profile }) {
               {loading ? <Loader2 className="animate-spin" size={16} /> : "Sync Counts"}
             </button>
           )}
-          {profile.email === "campusbridgeofficials@gmail.com" && (
+          {(profile?.role === "management" || isDeveloper) && (
             <div className="bg-emerald-50 px-4 py-3 rounded-2xl border border-emerald-100 text-center min-w-[100px] shrink-0">
               <div className="text-2xl font-bold text-emerald-600 mb-1">{pendingManagers.length}</div>
               <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Pending Mgrs</div>
@@ -691,7 +688,9 @@ export default function Management({ profile }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         {/* Left Column: Pending Events & Managers */}
         <div className="lg:col-span-2 space-y-8">
-          {profile?.role === "management" && pendingManagers.length > 0 && (
+
+          {/* FIX: Restored Developer visibility for Pending Approvals */}
+          {(profile?.role === "management" || isDeveloper) && pendingManagers.length > 0 && (
             <section className="bg-emerald-50/50 border border-emerald-100 rounded-[2.5rem] p-8">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
@@ -769,7 +768,7 @@ export default function Management({ profile }) {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
                   <input
                     type="text"
-                    placeholder="Search users..."
+                    placeholder="Search users or faculty..."
                     value={userSearch}
                     onChange={(e) => setUserSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
@@ -779,13 +778,14 @@ export default function Management({ profile }) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                 {allUsers
                   .filter(u => {
-                    // FIX: Safely check IDs so the app doesn't crash when one is missing
                     const searchLower = userSearch.toLowerCase();
+                    // FIX: Allow searching by role (e.g., typing "faculty")
                     return (
                       (u.displayName || "").toLowerCase().includes(searchLower) ||
                       (u.email || "").toLowerCase().includes(searchLower) ||
                       (u.studentId || "").toLowerCase().includes(searchLower) ||
-                      (u.facultyId || "").toLowerCase().includes(searchLower)
+                      (u.facultyId || "").toLowerCase().includes(searchLower) ||
+                      (u.role || "").toLowerCase().includes(searchLower)
                     );
                   })
                   .map(u => (
@@ -842,7 +842,8 @@ export default function Management({ profile }) {
                     (u.displayName || "").toLowerCase().includes(searchLower) ||
                     (u.email || "").toLowerCase().includes(searchLower) ||
                     (u.studentId || "").toLowerCase().includes(searchLower) ||
-                    (u.facultyId || "").toLowerCase().includes(searchLower)
+                    (u.facultyId || "").toLowerCase().includes(searchLower) ||
+                    (u.role || "").toLowerCase().includes(searchLower)
                   );
                 }).length === 0 && (
                     <div className="col-span-2 py-12 text-center">
@@ -853,7 +854,8 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {profile?.role === "management" && (
+          {/* FIX: Restored Developer visibility for Ads Management */}
+          {(profile?.role === "management" || isDeveloper) && (
             <section className="bg-zinc-900 rounded-[2.5rem] p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
 
@@ -1287,7 +1289,8 @@ export default function Management({ profile }) {
             </h2>
             <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
               {capacities.map(cap => {
-                const isFaculty = cap.type === "faculty";
+                // FIX: Legacy fallback for isFaculty so older capacities still render as Faculty
+                const isFaculty = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
                 const usersInDept = allUsers
                   .filter(u => {
                     if (isFaculty) {

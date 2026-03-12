@@ -51,7 +51,7 @@ export default function CreateEvent({ profile }) {
     capacity: 100,
     allowedDepartments: ["ALL"],
     requiresApproval: false,
-    hostName: profile.displayName || "",
+    hostName: profile?.displayName || "",
   });
 
   const [departments, setDepartments] = useState([]);
@@ -162,7 +162,11 @@ export default function CreateEvent({ profile }) {
 
   const handleSubmit = async () => {
     if (!profile) return;
-    if (!manualDescription) {
+
+    // FIX: Check description based on which step/mode the user is in
+    const finalDescription = step === 2 ? aiGenerated?.description : manualDescription;
+
+    if (!finalDescription) {
       toast.error("Please provide a description.");
       return;
     }
@@ -171,7 +175,10 @@ export default function CreateEvent({ profile }) {
     try {
       let downloadUrl = "";
 
-      if (manualPosterFile) {
+      // FIX: Use AI poster if in Step 2, otherwise use manual upload
+      if (step === 2 && aiGenerated?.posterUrl) {
+        downloadUrl = aiGenerated.posterUrl;
+      } else if (manualPosterFile) {
         toast.loading("Uploading poster to Cloudinary...", { id: "uploadToast" });
 
         const uploadData = new FormData();
@@ -200,7 +207,7 @@ export default function CreateEvent({ profile }) {
 
       const eventData = {
         ...formData,
-        description: manualDescription,
+        description: finalDescription,
         posterUrl: downloadUrl,
         hostId: profile.uid,
         hostName: formData.hostName,
@@ -215,6 +222,7 @@ export default function CreateEvent({ profile }) {
 
       await addDoc(collection(db, "events"), eventData);
 
+      // --- NOTIFICATION LOGIC (ALREADY PERFECT) ---
       await sendNotification({
         title: "New Event Request",
         message: `${profile.displayName} has requested approval for "${formData.title}"`,
@@ -222,6 +230,7 @@ export default function CreateEvent({ profile }) {
         recipients: ["role_management"],
         type: "EVENT"
       });
+      // --- END NOTIFICATION LOGIC ---
 
       toast.success("Event submitted for approval!");
       navigate("/");
@@ -525,6 +534,23 @@ export default function CreateEvent({ profile }) {
                       </>
                     )}
                   </button>
+                  <button
+                    onClick={handleGenerate}
+                    disabled={generating}
+                    className="w-full mt-4 bg-emerald-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all disabled:opacity-50 shadow-xl shadow-emerald-600/20 hover:shadow-2xl hover:-translate-y-1"
+                  >
+                    {generating ? (
+                      <>
+                        <Loader2 className="animate-spin" size={20} />
+                        <span>Generating AI Magic...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={20} />
+                        <span>Generate with AI</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -577,7 +603,7 @@ export default function CreateEvent({ profile }) {
                 disabled={generating}
                 className="flex-1 py-4 px-6 rounded-2xl border border-zinc-200 font-bold text-zinc-600 hover:bg-zinc-50 transition-all flex items-center justify-center gap-2"
               >
-                <Sparkles size={20} />
+                {generating ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
                 Regenerate Content
               </button>
               <button

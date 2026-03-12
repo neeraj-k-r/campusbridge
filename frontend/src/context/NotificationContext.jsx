@@ -186,8 +186,7 @@ export const NotificationProvider = ({ children, user, profile }) => {
       // In development this hits localhost, in production it hits your real URL
       const isLocal = window.location.hostname === "localhost";
       // Inside NotificationContext.jsx
-      const BACKEND_URL = "https://campus-bridge-zcme.onrender.com/api/send-notification";
-
+      const BACKEND_URL = "https://campusbridge-v9ba.onrender.com/api/send-notification";
       fetch(BACKEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

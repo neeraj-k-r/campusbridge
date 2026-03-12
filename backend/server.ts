@@ -114,22 +114,37 @@ async function startServer() {
       let targetTokens = [];
       const safeRecipients = recipients || [];
 
-      if (safeRecipients.includes("role_student")) {
-        const snap = await db.collection("users").where("role", "==", "student").get();
-        snap.forEach(doc => { if (doc.data().fcmToken) targetTokens.push(doc.data().fcmToken); });
-      } else if (safeRecipients.includes("role_management")) {
-        const snap = await db.collection("users").where("role", "==", "management").get();
-        snap.forEach(doc => { if (doc.data().fcmToken) targetTokens.push(doc.data().fcmToken); });
+      // 1. If "all" is in the array, fetch everyone with a token
+      if (safeRecipients.includes("all")) {
+        const snap = await db.collection("users").get();
+        snap.forEach(doc => {
+          if (doc.data().fcmToken) targetTokens.push(doc.data().fcmToken);
+        });
       } else {
-        for (const userId of safeRecipients) {
-          const userDoc = await db.collection("users").doc(userId).get();
-          if (userDoc.exists && userDoc.data().fcmToken) {
-            targetTokens.push(userDoc.data().fcmToken);
+        // 2. Otherwise, check for specific roles or specific user IDs
+        for (const recipient of safeRecipients) {
+          if (recipient === "role_student") {
+            const snap = await db.collection("users").where("role", "==", "student").get();
+            snap.forEach(doc => { if (doc.data().fcmToken) targetTokens.push(doc.data().fcmToken); });
+          } else if (recipient === "role_management") {
+            const snap = await db.collection("users").where("role", "==", "management").get();
+            snap.forEach(doc => { if (doc.data().fcmToken) targetTokens.push(doc.data().fcmToken); });
+          } else if (recipient === "role_faculty") {
+            const snap = await db.collection("users").where("role", "==", "faculty").get();
+            snap.forEach(doc => { if (doc.data().fcmToken) targetTokens.push(doc.data().fcmToken); });
+          } else {
+            // Treat as a specific user ID
+            const userDoc = await db.collection("users").doc(recipient).get();
+            if (userDoc.exists && userDoc.data().fcmToken) {
+              targetTokens.push(userDoc.data().fcmToken);
+            }
           }
         }
       }
 
+      // Remove duplicate tokens so a user doesn't get pinged twice
       const uniqueTokens = [...new Set(targetTokens)];
+
       if (uniqueTokens.length === 0) {
         return res.status(200).json({ message: "No tokens found." });
       }
@@ -261,7 +276,6 @@ async function startServer() {
     const distPath = path.resolve(__dirname, "../frontend/dist");
     app.use(express.static(distPath));
 
-    // 👇 THIS IS THE LINE THAT WAS FIXED 👇
     app.get(/(.*)/, (req, res) => {
       res.sendFile(path.resolve(distPath, "index.html"));
     });

@@ -176,7 +176,7 @@ export const NotificationProvider = ({ children, user, profile }) => {
       // 1. Add to Firestore (Your existing code)
       await addDoc(collection(db, "notifications"), {
         ...notificationData,
-        senderId: profile.id,
+        senderId: uid || "system",  // <--- CHANGED THIS LINE
         senderName: profile.displayName || "Admin",
         createdAt: Date.now(),
         isRead: false

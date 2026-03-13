@@ -106,15 +106,17 @@ export default function Management({ profile }) {
       }
     );
 
-    // FIX: Include management in directory
+    // Include management in directory
     const qUsers = query(collection(db, "users"), where("role", "in", ["student", "faculty", "alumni", "management"]));
     const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
       setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
     let unsubscribeManagers = () => { };
+    let unsubscribeAds = () => { };
+    let unsubscribeStrategy = () => { };
 
-    // FIX: Ensure Developer account can see pending Faculty/Managers
+    // Ensure Developer and Management can see pending Faculty/Managers
     if (profile?.role === "management" || isDeveloper) {
       const qManagers = query(
         collection(db, "users"),
@@ -124,28 +126,21 @@ export default function Management({ profile }) {
       unsubscribeManagers = onSnapshot(qManagers, (snapshot) => {
         setPendingManagers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
+    }
 
-      // Listen for advertisements
+    // ONLY Developer gets Advertisement data to save reads
+    if (isDeveloper) {
       const qAds = query(collection(db, "advertisements"), orderBy("createdAt", "desc"));
-      const unsubscribeAds = onSnapshot(qAds, (snapshot) => {
+      unsubscribeAds = onSnapshot(qAds, (snapshot) => {
         setAds(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
 
-      // Listen for ad strategy
-      const unsubscribeStrategy = onSnapshot(doc(db, "settings", "ads"), (docSnap) => {
+      const unsubscribeStrategyDoc = onSnapshot(doc(db, "settings", "ads"), (docSnap) => {
         if (docSnap.exists()) {
           setAdDisplayStrategy(docSnap.data().strategy || "round-robin");
         }
       });
-
-      return () => {
-        unsubscribeEvents();
-        unsubscribeCap();
-        unsubscribeUsers();
-        unsubscribeManagers();
-        unsubscribeAds();
-        unsubscribeStrategy();
-      };
+      unsubscribeStrategy = unsubscribeStrategyDoc;
     }
 
     return () => {
@@ -153,8 +148,10 @@ export default function Management({ profile }) {
       unsubscribeCap();
       unsubscribeUsers();
       unsubscribeManagers();
+      unsubscribeAds();
+      unsubscribeStrategy();
     };
-  }, [profile]);
+  }, [profile, isDeveloper]);
 
   const handleAdFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -183,6 +180,11 @@ export default function Management({ profile }) {
 
   const handleAdSubmit = async (e) => {
     e.preventDefault();
+    if (!isDeveloper) {
+      toast.error("Only developers can create advertisements.");
+      return;
+    }
+
     if (!adTitle.trim() || !adMessage.trim()) {
       toast.error("Please fill in all fields");
       return;
@@ -224,8 +226,7 @@ export default function Management({ profile }) {
         createdBy: profile.email
       });
 
-      // --- NEW NOTIFICATION LOGIC FOR ADS ---
-      let recipients = ["all"]; // default to everyone
+      let recipients = ["all"];
       if (adTargetAudience === "student") recipients = ["role_student"];
       if (adTargetAudience === "faculty") recipients = ["role_faculty"];
       if (adTargetAudience === "management") recipients = ["role_management"];
@@ -237,7 +238,6 @@ export default function Management({ profile }) {
         recipients: recipients,
         type: "ADVERTISEMENT"
       });
-      // --- END NOTIFICATION LOGIC ---
 
       toast.success("Advertisement created successfully!");
       setAdTitle("");
@@ -257,6 +257,7 @@ export default function Management({ profile }) {
   };
 
   const handleDeleteAd = async (adId) => {
+    if (!isDeveloper) return;
     try {
       await deleteDoc(doc(db, "advertisements", adId));
       toast.success("Advertisement deleted");
@@ -267,6 +268,7 @@ export default function Management({ profile }) {
   };
 
   const handleUpdateAdStrategy = async (strategy) => {
+    if (!isDeveloper) return;
     setStrategyLoading(true);
     try {
       await setDoc(doc(db, "settings", "ads"), { strategy }, { merge: true });
@@ -285,7 +287,6 @@ export default function Management({ profile }) {
     try {
       for (const cap of capacities) {
         let actualCount = 0;
-        // FIX: Legacy fallback for older faculty capacities
         const isFacultyCap = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
 
         if (isFacultyCap) {
@@ -448,7 +449,6 @@ export default function Management({ profile }) {
 
   const executeDeleteCapacity = async (cap) => {
     try {
-      // FIX: Legacy fallback
       const isFacultyCap = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
 
       const usersToDelete = allUsers.filter(u => {
@@ -480,18 +480,6 @@ export default function Management({ profile }) {
     }
   };
 
-  const handleDeleteCapacity = async (id) => {
-    if (!isDeveloper) {
-      toast.error("Only developers can delete capacities.");
-      return;
-    }
-    const cap = capacities.find(c => c.id === id);
-    if (cap) {
-      setPasswordModal({ isOpen: true, action: "delete_capacity", capacity: cap, email: profile?.email || "", password: "", error: "", loading: false });
-    }
-    setConfirmingDeleteId(null);
-  };
-
   const handleStatusUpdate = async (eventId, status) => {
     if (status === "rejected") {
       setSelectedEventId(eventId);
@@ -520,16 +508,8 @@ export default function Management({ profile }) {
             title: "New Event Announced!",
             message: `"${event.title}" is now open for registration. Check it out!`,
             link: `/event/${eventId}`,
-            recipients: ["role_student"],
+            recipients: ["all"],
             type: "EVENT"
-          });
-
-          await sendNotification({
-            title: "Event Approved",
-            message: `You successfully approved "${event.title}".`,
-            link: `/event/${eventId}`,
-            recipients: ["role_management"],
-            type: "INFO"
           });
         }
       }
@@ -689,7 +669,6 @@ export default function Management({ profile }) {
         {/* Left Column: Pending Events & Managers */}
         <div className="lg:col-span-2 space-y-8">
 
-          {/* FIX: Restored Developer visibility for Pending Approvals */}
           {(profile?.role === "management" || isDeveloper) && pendingManagers.length > 0 && (
             <section className="bg-emerald-50/50 border border-emerald-100 rounded-[2.5rem] p-8">
               <div className="flex items-center justify-between mb-6">
@@ -779,7 +758,6 @@ export default function Management({ profile }) {
                 {allUsers
                   .filter(u => {
                     const searchLower = userSearch.toLowerCase();
-                    // FIX: Allow searching by role (e.g., typing "faculty")
                     return (
                       (u.displayName || "").toLowerCase().includes(searchLower) ||
                       (u.email || "").toLowerCase().includes(searchLower) ||
@@ -854,8 +832,8 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {/* FIX: Restored Developer visibility for Ads Management */}
-          {(profile?.role === "management" || isDeveloper) && (
+          {/* SECURED: ONLY DEVELOPER CAN PUT ADVERTISEMENTS */}
+          {isDeveloper && (
             <section className="bg-zinc-900 rounded-[2.5rem] p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
 
@@ -865,7 +843,7 @@ export default function Management({ profile }) {
                   Advertisement Management
                 </h2>
                 <div className="px-3 py-1 rounded-full bg-white/10 text-xs font-bold uppercase tracking-wider border border-white/10 shrink-0 self-start sm:self-auto">
-                  Management Only
+                  Developer Only
                 </div>
               </div>
 

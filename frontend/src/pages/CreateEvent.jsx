@@ -5,6 +5,7 @@ import { db } from "../firebase";
 import { generateEventDescription, generateEventPoster } from "../services/gemini";
 import { toast } from "react-hot-toast";
 import { motion, AnimatePresence } from "motion/react";
+import { Client } from "@gradio/client";
 import {
   Sparkles,
   Calendar,
@@ -119,17 +120,29 @@ export default function CreateEvent({ profile }) {
       toast.error("Please enter a description first");
       return;
     }
+
     setIsEnhancing(true);
+
     try {
-      const response = await generateEventDescription({
-        ...formData,
-        additionalDetails: manualDescription
+      // Connect to your specific Hugging Face Space
+      const client = await Client.connect("Hiraj/event-ai-generator");
+
+      // Call the endpoint with the user's current description
+      const result = await client.predict("/generate_event", {
+        details: manualDescription,
       });
-      setManualDescription(response.description);
-      toast.success("Description enhanced by AI!");
+
+      // Gradio returns the output in a data array. We grab the first item.
+      if (result && result.data && result.data.length > 0) {
+        setManualDescription(result.data[0]);
+        toast.success("Description enhanced by AI!");
+      } else {
+        throw new Error("Invalid response from AI");
+      }
+
     } catch (error) {
       console.error("Enhancement error:", error);
-      toast.error("Failed to enhance description.");
+      toast.error("Failed to enhance description. Please try again.");
     } finally {
       setIsEnhancing(false);
     }

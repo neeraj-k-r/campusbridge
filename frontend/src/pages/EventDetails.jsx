@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable"; // Import the function directly
 import {
   doc,
   getDoc,
@@ -15,7 +17,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { toast } from "react-hot-toast";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,
   MapPin,
@@ -29,19 +31,22 @@ import {
   QrCode,
   MessageSquare,
   Trash2,
-  Share2
+  Share2,
+  Lock,
+  Unlock,
+  Download
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { format } from "date-fns";
 import QRScanner from "../components/QRScanner";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "../lib/utils";
-// --- IMPORT ADDED HERE ---
 import { useNotifications } from "../context/NotificationContext";
 
 export default function EventDetails({ profile }) {
   const { id } = useParams();
   const navigate = useNavigate();
+
   const [event, setEvent] = useState(null);
   const [registration, setRegistration] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -54,12 +59,12 @@ export default function EventDetails({ profile }) {
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [attendees, setAttendees] = useState([]);
 
-  // --- HOOK INITIALIZED HERE ---
   const { sendNotification } = useNotifications();
 
   useEffect(() => {
     if (!id || !profile) return;
 
+    // 1. Fetch Event Details
     const unsubscribe = onSnapshot(doc(db, "events", id),
       (docSnap) => {
         if (docSnap.exists()) {
@@ -76,6 +81,7 @@ export default function EventDetails({ profile }) {
       }
     );
 
+    // 2. Fetch Feedback
     const fetchFeedback = async () => {
       try {
         const fbSnap = await getDocs(collection(db, "events", id, "feedback"));
@@ -84,16 +90,16 @@ export default function EventDetails({ profile }) {
         console.error("Feedback fetch error:", error);
       }
     };
-
     fetchFeedback();
 
-    const q = query(
+    // 3. Fetch Current User's Registration
+    const qReg = query(
       collection(db, "registrations"),
       where("eventId", "==", id),
       where("studentId", "==", profile.uid)
     );
 
-    const unsubscribeReg = onSnapshot(q,
+    const unsubscribeReg = onSnapshot(qReg,
       (snapshot) => {
         if (!snapshot.empty) {
           setRegistration({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
@@ -101,12 +107,10 @@ export default function EventDetails({ profile }) {
           setRegistration(null);
         }
       },
-      (error) => {
-        console.error("Registration listener error:", error);
-      }
+      (error) => console.error("Registration listener error:", error)
     );
 
-    // Fetch all attendees
+    // 4. Fetch All Attendees (Guest List)
     const qAttendees = query(
       collection(db, "registrations"),
       where("eventId", "==", id)
@@ -124,9 +128,7 @@ export default function EventDetails({ profile }) {
         });
         setAttendees(attendeesList);
       },
-      (error) => {
-        console.error("Attendees listener error:", error);
-      }
+      (error) => console.error("Attendees listener error:", error)
     );
 
     return () => {
@@ -135,6 +137,10 @@ export default function EventDetails({ profile }) {
       unsubscribeAttendees();
     };
   }, [id, profile, navigate]);
+
+  // ==========================================
+  // HANDLERS
+  // ==========================================
 
   const handleDeleteEvent = async () => {
     try {
@@ -152,6 +158,11 @@ export default function EventDetails({ profile }) {
 
     if (event.allowedDepartments && !event.allowedDepartments.includes("ALL") && !event.allowedDepartments.includes(profile.department)) {
       toast.error("You are not eligible to register for this event.");
+      return;
+    }
+
+    if (event.registrationClosed) {
+      toast.error("Registration for this event is closed.");
       return;
     }
 
@@ -199,8 +210,6 @@ export default function EventDetails({ profile }) {
           registeredCount: increment(1)
         });
 
-        // --- NEW NOTIFICATION LOGIC ---
-        // Notify the host that someone registered
         if (event.hostId) {
           await sendNotification({
             title: "New Registration",
@@ -210,13 +219,9 @@ export default function EventDetails({ profile }) {
             type: "INFO"
           });
         }
-        // --- END NOTIFICATION LOGIC ---
 
         toast.success("Successfully registered for the event!");
       } else {
-
-        // --- NEW NOTIFICATION LOGIC ---
-        // Notify host that someone applied
         if (event.hostId) {
           await sendNotification({
             title: "Pending Registration",
@@ -226,8 +231,6 @@ export default function EventDetails({ profile }) {
             type: "INFO"
           });
         }
-        // --- END NOTIFICATION LOGIC ---
-
         toast.success("Registration submitted! Waiting for host approval.");
       }
 
@@ -257,7 +260,6 @@ export default function EventDetails({ profile }) {
         registeredCount: increment(1)
       });
 
-      // --- NEW NOTIFICATION LOGIC ---
       await sendNotification({
         title: "Registration Approved!",
         message: `Your request to join ${event.title} was approved. You can now view your entry pass.`,
@@ -265,7 +267,6 @@ export default function EventDetails({ profile }) {
         recipients: [studentId],
         type: "INFO"
       });
-      // --- END NOTIFICATION LOGIC ---
 
       toast.success("Registration approved!");
     } catch (error) {
@@ -276,9 +277,7 @@ export default function EventDetails({ profile }) {
 
   const handleRejectRegistration = async (regId) => {
     try {
-      await updateDoc(doc(db, "registrations", regId), {
-        status: "rejected"
-      });
+      await updateDoc(doc(db, "registrations", regId), { status: "rejected" });
       toast.success("Registration rejected");
     } catch (error) {
       console.error("Error rejecting:", error);
@@ -288,17 +287,13 @@ export default function EventDetails({ profile }) {
 
   const handleScan = async (data) => {
     try {
-      console.log("Scanned data:", data);
       let decoded;
       try {
         decoded = JSON.parse(atob(data));
       } catch (e) {
-        console.error("Failed to decode QR data:", e);
         toast.error("Invalid QR code format");
         return;
       }
-
-      console.log("Decoded data:", decoded);
 
       if (decoded.eventId !== id) {
         toast.error("Invalid QR code for this event");
@@ -325,10 +320,7 @@ export default function EventDetails({ profile }) {
         return;
       }
 
-      await updateDoc(doc(db, "registrations", regDoc.id), {
-        attended: true
-      });
-
+      await updateDoc(doc(db, "registrations", regDoc.id), { attended: true });
       toast.success(`Attendance marked for ${regData.studentName}!`);
     } catch (error) {
       console.error("Scan error:", error);
@@ -340,8 +332,6 @@ export default function EventDetails({ profile }) {
     try {
       await updateDoc(doc(db, "events", id), { status: "completed" });
 
-      // --- NEW NOTIFICATION LOGIC ---
-      // Get all approved students
       const q = query(
         collection(db, "registrations"),
         where("eventId", "==", id),
@@ -359,7 +349,6 @@ export default function EventDetails({ profile }) {
           type: "EVENT"
         });
       }
-      // --- END NOTIFICATION LOGIC ---
 
       toast.success("Event ended successfully");
     } catch (error) {
@@ -378,7 +367,6 @@ export default function EventDetails({ profile }) {
         createdAt: Date.now()
       });
 
-      // --- NEW NOTIFICATION LOGIC ---
       if (event.hostId) {
         await sendNotification({
           title: "New Feedback",
@@ -388,7 +376,6 @@ export default function EventDetails({ profile }) {
           type: "INFO"
         });
       }
-      // --- END NOTIFICATION LOGIC ---
 
       setFeedbackText("");
       toast.success("Feedback submitted!");
@@ -398,6 +385,84 @@ export default function EventDetails({ profile }) {
       toast.error("Failed to submit feedback");
     } finally {
       setSubmittingFeedback(false);
+    }
+  };
+
+  const handleToggleRegistration = async () => {
+    try {
+      const newState = !event.registrationClosed;
+      await updateDoc(doc(db, "events", id), {
+        registrationClosed: newState
+      });
+      toast.success(newState ? "Registration closed" : "Registration opened");
+    } catch (error) {
+      console.error("Error toggling registration:", error);
+      toast.error("Failed to update registration status");
+    }
+  };
+
+  const handleDownloadAttendance = () => {
+    try {
+      if (attendees.length === 0) {
+        toast.error("No registrations to download");
+        return;
+      }
+
+      // 1. Sort attendees alphabetically
+      const sortedAttendees = [...attendees].sort((a, b) =>
+        a.studentName.trim().localeCompare(b.studentName.trim())
+      );
+
+      // 2. Initialize PDF
+      const doc = new jsPDF();
+
+      // 3. Add Header Branding
+      doc.setFontSize(18);
+      doc.setTextColor(5, 150, 105); // emerald-600
+      doc.text("CampusBridge", 14, 20);
+
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated on: ${format(new Date(), "PPP p")}`, 14, 26);
+
+      // 4. Add Event Info
+      doc.setFontSize(14);
+      doc.setTextColor(0);
+      doc.text(`Attendance Sheet: ${event.title}`, 14, 38);
+      doc.setFontSize(10);
+      doc.text(`Venue: ${event.location} | Date: ${format(new Date(event.date), "PPP")}`, 14, 44);
+
+      // 5. Create Table Data
+      const tableHeaders = [["S.No", "Student Name", "Email", "Student ID", "Status", "Attended"]];
+      const tableRows = sortedAttendees.map((a, index) => [
+        index + 1,
+        a.studentName.trim().toUpperCase(),
+        a.studentEmail.toLowerCase(),
+        a.collegeStudentId || "N/A",
+        a.status.toUpperCase(),
+        a.attended ? "YES" : "NO"
+      ]);
+
+      // 6. Generate Table (CALLING AUTO-TABLE MANUALLY)
+      autoTable(doc, {
+        startY: 50,
+        head: tableHeaders,
+        body: tableRows,
+        theme: 'grid',
+        headStyles: { fillColor: [5, 150, 105], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        styles: { fontSize: 9, cellPadding: 3 },
+        margin: { top: 40 },
+      });
+
+      // 7. Save
+      const fileName = `Attendance_${event.title.replace(/\s+/g, "_")}.pdf`;
+      doc.save(fileName);
+
+      toast.success("PDF table downloaded!");
+    } catch (error) {
+      console.error("Error downloading PDF:", error);
+      toast.error("Failed to generate PDF");
     }
   };
 
@@ -417,6 +482,10 @@ export default function EventDetails({ profile }) {
       console.error("Error sharing:", error);
     }
   };
+
+  // ==========================================
+  // RENDER HELPERS
+  // ==========================================
 
   if (loading) {
     return (
@@ -446,6 +515,8 @@ export default function EventDetails({ profile }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
         <div className="lg:col-span-8 space-y-8">
+
+          {/* Hero Poster */}
           <div className="aspect-video rounded-[2rem] overflow-hidden border border-zinc-200 shadow-2xl shadow-zinc-900/10 bg-zinc-100 relative group">
             <img
               src={event.posterUrl}
@@ -456,6 +527,7 @@ export default function EventDetails({ profile }) {
             <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
 
+          {/* Core Info */}
           <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 md:p-10 shadow-sm">
             <div className="flex items-start justify-between gap-4 mb-8">
               <h1 className="text-4xl md:text-5xl font-serif font-bold text-zinc-900 leading-tight">{event.title}</h1>
@@ -515,7 +587,7 @@ export default function EventDetails({ profile }) {
             )}
           </div>
 
-          {/* Attendees Section */}
+          {/* Attendees / Guest List */}
           <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 md:p-10 shadow-sm">
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-2xl font-bold text-zinc-900 flex items-center gap-3">
@@ -569,6 +641,7 @@ export default function EventDetails({ profile }) {
                       </div>
                     </div>
 
+                    {/* Host Approval Controls */}
                     {isHost && attendee.status === "pending" && (
                       <div className="flex gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
@@ -594,6 +667,7 @@ export default function EventDetails({ profile }) {
           </div>
         </div>
 
+        {/* Right Sidebar - Action Center */}
         <div className="lg:col-span-4 space-y-6">
           <div className="sticky top-24 space-y-6">
             <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 shadow-xl shadow-zinc-900/5">
@@ -608,6 +682,43 @@ export default function EventDetails({ profile }) {
                     You are hosting this event
                   </div>
 
+                  {/* Toggle Registration (Open/Close) */}
+                  {event.status !== "completed" && (
+                    <button
+                      onClick={handleToggleRegistration}
+                      className={cn(
+                        "w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all border shadow-sm",
+                        event.registrationClosed
+                          ? "bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-100"
+                          : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100"
+                      )}
+                    >
+                      {event.registrationClosed ? (
+                        <>
+                          <Unlock size={20} />
+                          Open Registration
+                        </>
+                      ) : (
+                        <>
+                          <Lock size={20} />
+                          Close Registration
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Download Attendance */}
+                  {event.registrationClosed && (
+                    <button
+                      onClick={handleDownloadAttendance}
+                      className="w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-600/20"
+                    >
+                      <Download size={20} />
+                      Download Attendance
+                    </button>
+                  )}
+
+                  {/* Event End / Scanning Controls */}
                   {event.status === "completed" ? (
                     <div className="space-y-4">
                       <h4 className="font-bold text-zinc-900 flex items-center gap-2">
@@ -698,6 +809,7 @@ export default function EventDetails({ profile }) {
                     </>
                   )}
 
+                  {/* Delete Event Controls */}
                   {showDeleteConfirm ? (
                     <div className="p-4 bg-red-50 border border-red-100 rounded-2xl space-y-3">
                       <p className="text-red-800 text-sm font-medium text-center">Are you sure you want to delete this event?</p>
@@ -727,6 +839,7 @@ export default function EventDetails({ profile }) {
                   )}
                 </div>
               ) : registration ? (
+                /* User is Registered - Show Pass / Status */
                 registration.status === "rejected" ? (
                   <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-700 text-sm font-bold flex items-center gap-3">
                     <div className="bg-white p-1.5 rounded-lg shadow-sm">
@@ -802,33 +915,46 @@ export default function EventDetails({ profile }) {
                   </div>
                 )
               ) : isStudent ? (
-                <div className="space-y-4">
-                  {event.capacity && event.registeredCount >= event.capacity && (
-                    <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-700 text-sm font-bold flex items-center gap-3">
-                      <div className="bg-white p-1.5 rounded-lg shadow-sm">
-                        <XCircle size={16} className="text-red-600" />
+                /* User is NOT Registered yet */
+                event.status === "completed" ? (
+                  <div className="p-4 bg-zinc-100 border border-zinc-200 rounded-2xl text-zinc-600 text-sm font-bold flex items-center gap-3">
+                    <CheckCircle2 size={16} />
+                    Event Completed
+                  </div>
+                ) : event.registrationClosed ? (
+                  <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-amber-700 text-sm font-bold flex items-center gap-3">
+                    <Lock size={16} />
+                    Registration Closed
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {event.capacity && event.registeredCount >= event.capacity && (
+                      <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-700 text-sm font-bold flex items-center gap-3">
+                        <div className="bg-white p-1.5 rounded-lg shadow-sm">
+                          <XCircle size={16} className="text-red-600" />
+                        </div>
+                        This event is fully booked
                       </div>
-                      This event is fully booked
-                    </div>
-                  )}
-                  <button
-                    onClick={handleRegister}
-                    disabled={registering || (!!event.capacity && event.registeredCount >= event.capacity)}
-                    className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-zinc-900/20 hover:shadow-2xl hover:-translate-y-0.5"
-                  >
-                    {registering ? (
-                      <Loader2 className="animate-spin" size={20} />
-                    ) : (
-                      <>
-                        <QrCode size={20} />
-                        {!!event.capacity && event.registeredCount >= event.capacity ? "Join Waitlist" : "Register Now"}
-                      </>
                     )}
-                  </button>
-                  <p className="text-xs text-center text-zinc-400">
-                    By registering, you agree to the event guidelines.
-                  </p>
-                </div>
+                    <button
+                      onClick={handleRegister}
+                      disabled={registering || (!!event.capacity && event.registeredCount >= event.capacity)}
+                      className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-zinc-900/20 hover:shadow-2xl hover:-translate-y-0.5"
+                    >
+                      {registering ? (
+                        <Loader2 className="animate-spin" size={20} />
+                      ) : (
+                        <>
+                          <QrCode size={20} />
+                          {!!event.capacity && event.registeredCount >= event.capacity ? "Join Waitlist" : "Register Now"}
+                        </>
+                      )}
+                    </button>
+                    <p className="text-xs text-center text-zinc-400">
+                      By registering, you agree to the event guidelines.
+                    </p>
+                  </div>
+                )
               ) : (
                 <div className="p-4 bg-zinc-50 border border-zinc-100 rounded-2xl text-zinc-500 text-sm font-medium text-center">
                   Registration is only open for students.
@@ -848,10 +974,46 @@ export default function EventDetails({ profile }) {
                 </div>
               </div>
             </div>
-
           </div>
         </div>
       </div>
+
+      {/* Feedback Section for Host (Moved to bottom on desktop layout if they prefer) */}
+      {isHost && event.status === "completed" && (
+        <div className="mt-12">
+          <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 md:p-10 shadow-sm">
+            <h3 className="text-2xl font-bold text-zinc-900 mb-8 flex items-center gap-3">
+              <MessageSquare size={24} className="text-zinc-400" />
+              Event Feedback
+            </h3>
+            {feedback.length === 0 ? (
+              <div className="text-center py-12 bg-zinc-50 rounded-2xl border border-zinc-100 border-dashed">
+                <MessageSquare className="mx-auto text-zinc-300 mb-3" size={32} />
+                <p className="text-zinc-500 font-medium">No feedback received yet.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {feedback.map((fb, i) => (
+                  <div key={i} className="p-6 bg-zinc-50 rounded-2xl border border-zinc-100">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center font-bold text-zinc-400 shadow-sm border border-zinc-100">
+                        {fb.studentName.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-bold text-zinc-900">{fb.studentName}</p>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">
+                          {format(new Date(fb.createdAt), "MMM d, yyyy")}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-zinc-600 leading-relaxed text-sm italic">"{fb.text}"</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

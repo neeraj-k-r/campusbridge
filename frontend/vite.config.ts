@@ -21,18 +21,8 @@ export default defineConfig(({ mode }) => {
           short_name: "CAMPUS BRIDGE",
           name: "CAMPUS BRIDGE",
           icons: [
-            {
-              src: "/icon-192x192.png",
-              sizes: "192x192",
-              type: "image/png",
-              purpose: "any maskable"
-            },
-            {
-              src: "/icon-512x512.png",
-              sizes: "512x512",
-              type: "image/png",
-              purpose: "any maskable"
-            }
+            { src: "/icon-192x192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+            { src: "/icon-512x512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
           ],
           start_url: "/",
           background_color: "#ffffff",
@@ -44,31 +34,28 @@ export default defineConfig(({ mode }) => {
     ],
     build: {
       rollupOptions: {
-        // This is the CRITICAL part for the Render error
-        // It tells Rollup to treat these modules as external so they don't crash the build
-        external: [],
-        output: {
-          manualChunks: {
-            // Separates heavy libraries into their own files for better loading
-            pdf: ['jspdf', 'jspdf-autotable'],
-          },
-        },
+        // Explicitly externalize modules that shouldn't be in the browser bundle
+        external: ['fs', 'path', 'canvas', 'http', 'https', 'url', 'zlib', 'stream'],
       },
       commonjsOptions: {
-        // Required for jspdf to work in production builds
         transformMixedEsModules: true,
       }
-    },
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || process.env.GEMINI_API_KEY),
-      'import.meta.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || process.env.GEMINI_API_KEY),
-      // Fixes "global is not defined" errors often seen with PDF libraries
-      'global': 'window',
     },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        // These aliases prevent the "unintended external module" error
+        // by pointing Node-only modules to an empty object.
+        'fs': 'shimmer',
+        'path': 'shimmer',
+        'stream': 'shimmer',
+        'zlib': 'shimmer',
       },
+    },
+    define: {
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || process.env.GEMINI_API_KEY),
+      'import.meta.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || process.env.GEMINI_API_KEY),
+      'global': 'window',
     },
     optimizeDeps: {
       include: ['jspdf', 'jspdf-autotable'],

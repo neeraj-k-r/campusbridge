@@ -15,31 +15,38 @@ export default defineConfig(({ mode }) => {
         injectRegister: 'auto',
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-          importScripts: ['/firebase-messaging-sw.js']
+          // FIX 1: Increase the Workbox cache limit to 4MB (4194304 bytes)
+          maximumFileSizeToCacheInBytes: 4194304,
         },
         manifest: {
           short_name: "CAMPUS BRIDGE",
           name: "CAMPUS BRIDGE",
-          start_url: "/",
-          display: "standalone",
-          theme_color: "#000000",
-          background_color: "#ffffff",
           icons: [
             { src: "/icon-192x192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
             { src: "/icon-512x512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
           ],
+          start_url: "/",
+          background_color: "#ffffff",
+          display: "standalone",
+          theme_color: "#000000",
+          orientation: "portrait"
         }
       })
     ],
     build: {
-      outDir: 'dist',
+      // Suppresses the yellow warning in the Vite terminal
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
-        // Only externalize actual Node built-ins if they cause errors later
-        // But do NOT externalize jspdf here, or it won't be bundled!
-        external: [],
-      },
-      commonjsOptions: {
-        transformMixedEsModules: true,
+        output: {
+          // FIX 2: Code splitting! This chops your code into smaller files 
+          // so no single file hits the 2MB limit in the first place.
+          manualChunks: {
+            vendor: ['react', 'react-dom', 'react-router-dom'],
+            firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+            pdf: ['jspdf', 'jspdf-autotable'],
+            ui: ['lucide-react', 'framer-motion', 'react-hot-toast']
+          }
+        }
       }
     },
     resolve: {

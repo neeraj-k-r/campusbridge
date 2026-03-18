@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable"; // Import the function directly
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   doc,
   getDoc,
@@ -156,13 +156,19 @@ export default function EventDetails({ profile }) {
   const handleRegister = async () => {
     if (!id || !profile || !event) return;
 
-    if (event.allowedDepartments && !event.allowedDepartments.includes("ALL") && !event.allowedDepartments.includes(profile.department)) {
-      toast.error("You are not eligible to register for this event.");
+    // STRICT CHECK: Prevent registration if the event is closed, completed, or the date has passed
+    const eventDate = new Date(event.date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isPastEvent = eventDate.getTime() < today.getTime();
+
+    if (event.registrationClosed || event.status === "completed" || isPastEvent) {
+      toast.error("Registration for this event is closed.");
       return;
     }
 
-    if (event.registrationClosed) {
-      toast.error("Registration for this event is closed.");
+    if (event.allowedDepartments && !event.allowedDepartments.includes("ALL") && !event.allowedDepartments.includes(profile.department)) {
+      toast.error("You are not eligible to register for this event.");
       return;
     }
 
@@ -408,31 +414,26 @@ export default function EventDetails({ profile }) {
         return;
       }
 
-      // 1. Sort attendees alphabetically
       const sortedAttendees = [...attendees].sort((a, b) =>
         a.studentName.trim().localeCompare(b.studentName.trim())
       );
 
-      // 2. Initialize PDF
       const doc = new jsPDF();
 
-      // 3. Add Header Branding
       doc.setFontSize(18);
-      doc.setTextColor(5, 150, 105); // emerald-600
+      doc.setTextColor(5, 150, 105);
       doc.text("CampusBridge", 14, 20);
 
       doc.setFontSize(10);
       doc.setTextColor(100);
       doc.text(`Generated on: ${format(new Date(), "PPP p")}`, 14, 26);
 
-      // 4. Add Event Info
       doc.setFontSize(14);
       doc.setTextColor(0);
       doc.text(`Attendance Sheet: ${event.title}`, 14, 38);
       doc.setFontSize(10);
       doc.text(`Venue: ${event.location} | Date: ${format(new Date(event.date), "PPP")}`, 14, 44);
 
-      // 5. Create Table Data
       const tableHeaders = [["S.No", "Student Name", "Email", "Student ID", "Status", "Attended"]];
       const tableRows = sortedAttendees.map((a, index) => [
         index + 1,
@@ -443,7 +444,6 @@ export default function EventDetails({ profile }) {
         a.attended ? "YES" : "NO"
       ]);
 
-      // 6. Generate Table (CALLING AUTO-TABLE MANUALLY)
       autoTable(doc, {
         startY: 50,
         head: tableHeaders,
@@ -455,7 +455,6 @@ export default function EventDetails({ profile }) {
         margin: { top: 40 },
       });
 
-      // 7. Save
       const fileName = `Attendance_${event.title.replace(/\s+/g, "_")}.pdf`;
       doc.save(fileName);
 
@@ -502,6 +501,12 @@ export default function EventDetails({ profile }) {
 
   const isHost = profile?.uid === event.hostId;
   const isStudent = profile?.role?.toLowerCase() === 'student';
+
+  // Calculate if the event date has passed
+  const eventDateObj = new Date(event.date);
+  const todayObj = new Date();
+  todayObj.setHours(0, 0, 0, 0);
+  const isPastEvent = eventDateObj.getTime() < todayObj.getTime();
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -607,56 +612,56 @@ export default function EventDetails({ profile }) {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                 {attendees.map((attendee, index) => (
-                  <div key={index} className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-zinc-100 hover:border-zinc-300 hover:shadow-md transition-all group">
-                    <div className={cn(
-                      "w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold shrink-0 transition-colors shadow-sm",
-                      attendee.attended ? "bg-emerald-100 text-emerald-700" :
-                        attendee.status === "pending" ? "bg-amber-100 text-amber-700" :
-                          attendee.status === "rejected" ? "bg-red-100 text-red-700" :
-                            "bg-zinc-100 text-zinc-500"
-                    )}>
-                      {attendee.studentName.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-base font-bold text-zinc-900 truncate uppercase">{attendee.studentName}</div>
-                      <div className="text-xs text-zinc-500 truncate flex flex-wrap items-center gap-1.5 mt-0.5">
-                        <span className="font-medium bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
-                          {attendee.collegeStudentId || "Student"}
-                        </span>
-                        {attendee.attended && (
-                          <span className="text-emerald-600 flex items-center gap-1 font-bold">
-                            <CheckCircle2 size={12} /> Attended
+                  <div key={index} className="flex flex-col gap-3 p-4 bg-white rounded-2xl border border-zinc-100 hover:border-zinc-300 hover:shadow-md transition-all">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold shrink-0 shadow-sm",
+                        attendee.attended ? "bg-emerald-100 text-emerald-700" :
+                          attendee.status === "pending" ? "bg-amber-100 text-amber-700" :
+                            attendee.status === "rejected" ? "bg-red-100 text-red-700" :
+                              "bg-zinc-100 text-zinc-500"
+                      )}>
+                        {attendee.studentName.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-base font-bold text-zinc-900 truncate uppercase">{attendee.studentName}</div>
+                        <div className="text-xs text-zinc-500 flex flex-wrap items-center gap-1.5 mt-0.5">
+                          <span className="font-medium bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100 truncate max-w-[100px]">
+                            {attendee.collegeStudentId || "Student"}
                           </span>
-                        )}
-                        {attendee.status === "pending" && (
-                          <span className="text-amber-600 flex items-center gap-1 font-bold">
-                            <Clock size={12} /> Pending
-                          </span>
-                        )}
-                        {attendee.status === "rejected" && (
-                          <span className="text-red-600 flex items-center gap-1 font-bold">
-                            <XCircle size={12} /> Rejected
-                          </span>
-                        )}
+                          {attendee.attended && (
+                            <span className="text-emerald-600 flex items-center gap-1 font-bold">
+                              <CheckCircle2 size={12} /> Attended
+                            </span>
+                          )}
+                          {attendee.status === "pending" && (
+                            <span className="text-amber-600 flex items-center gap-1 font-bold">
+                              <Clock size={12} /> Pending
+                            </span>
+                          )}
+                          {attendee.status === "rejected" && (
+                            <span className="text-red-600 flex items-center gap-1 font-bold">
+                              <XCircle size={12} /> Rejected
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Host Approval Controls */}
+                    {/* ALWAYS VISIBLE Host Approval Controls with Text (Alphabets) */}
                     {isHost && attendee.status === "pending" && (
-                      <div className="flex gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex gap-2 pt-2 border-t border-zinc-50">
                         <button
                           onClick={() => handleApproveRegistration(attendee.id, attendee.studentId)}
-                          className="p-2 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 transition-colors border border-emerald-100"
-                          title="Approve"
+                          className="flex-1 py-2 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 transition-colors border border-emerald-100 font-bold text-sm flex items-center justify-center gap-1.5"
                         >
-                          <CheckCircle2 size={18} />
+                          <CheckCircle2 size={16} /> Approve
                         </button>
                         <button
                           onClick={() => handleRejectRegistration(attendee.id)}
-                          className="p-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors border border-red-100"
-                          title="Reject"
+                          className="flex-1 py-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors border border-red-100 font-bold text-sm flex items-center justify-center gap-1.5"
                         >
-                          <XCircle size={18} />
+                          <XCircle size={16} /> Reject
                         </button>
                       </div>
                     )}
@@ -683,7 +688,7 @@ export default function EventDetails({ profile }) {
                   </div>
 
                   {/* Toggle Registration (Open/Close) */}
-                  {event.status !== "completed" && (
+                  {event.status !== "completed" && !isPastEvent && (
                     <button
                       onClick={handleToggleRegistration}
                       className={cn(
@@ -719,7 +724,7 @@ export default function EventDetails({ profile }) {
                   )}
 
                   {/* Event End / Scanning Controls */}
-                  {event.status === "completed" ? (
+                  {event.status === "completed" || isPastEvent ? (
                     <div className="space-y-4">
                       <h4 className="font-bold text-zinc-900 flex items-center gap-2">
                         <MessageSquare size={18} className="text-zinc-400" />
@@ -863,7 +868,7 @@ export default function EventDetails({ profile }) {
                       You are registered!
                     </div>
 
-                    {event.status === "completed" ? (
+                    {event.status === "completed" || isPastEvent ? (
                       <div className="space-y-4">
                         <h4 className="font-bold text-zinc-900 flex items-center gap-2">
                           <MessageSquare size={18} className="text-zinc-400" />
@@ -916,10 +921,10 @@ export default function EventDetails({ profile }) {
                 )
               ) : isStudent ? (
                 /* User is NOT Registered yet */
-                event.status === "completed" ? (
+                event.status === "completed" || isPastEvent ? (
                   <div className="p-4 bg-zinc-100 border border-zinc-200 rounded-2xl text-zinc-600 text-sm font-bold flex items-center gap-3">
                     <CheckCircle2 size={16} />
-                    Event Completed
+                    Event has ended
                   </div>
                 ) : event.registrationClosed ? (
                   <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-amber-700 text-sm font-bold flex items-center gap-3">
@@ -978,8 +983,8 @@ export default function EventDetails({ profile }) {
         </div>
       </div>
 
-      {/* Feedback Section for Host (Moved to bottom on desktop layout if they prefer) */}
-      {isHost && event.status === "completed" && (
+      {/* Feedback Section for Host */}
+      {isHost && (event.status === "completed" || isPastEvent) && (
         <div className="mt-12">
           <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 md:p-10 shadow-sm">
             <h3 className="text-2xl font-bold text-zinc-900 mb-8 flex items-center gap-3">

@@ -42,19 +42,27 @@ export default defineConfig(({ mode }) => {
         }
       })
     ],
-    // ADDED BUILD CONFIG FOR JSPDF
     build: {
       rollupOptions: {
-        external: [], // If a specific module like 'fs' was listed in the error, put it here
+        // This is the CRITICAL part for the Render error
+        // It tells Rollup to treat these modules as external so they don't crash the build
+        external: [],
+        output: {
+          manualChunks: {
+            // Separates heavy libraries into their own files for better loading
+            pdf: ['jspdf', 'jspdf-autotable'],
+          },
+        },
       },
       commonjsOptions: {
-        transformMixedEsModules: true, // Helps with jspdf's mixed module format
+        // Required for jspdf to work in production builds
+        transformMixedEsModules: true,
       }
     },
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || process.env.GEMINI_API_KEY),
       'import.meta.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || process.env.GEMINI_API_KEY),
-      // Important for some libraries that check for global/process
+      // Fixes "global is not defined" errors often seen with PDF libraries
       'global': 'window',
     },
     resolve: {
@@ -62,7 +70,6 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
-    // ADDED TO HELP VITE CACHE JSPDF LOCALLY
     optimizeDeps: {
       include: ['jspdf', 'jspdf-autotable'],
     },

@@ -33,9 +33,11 @@ export default defineConfig(({ mode }) => {
       })
     ],
     build: {
+      outDir: 'dist',
+      sourcemap: false,
       rollupOptions: {
-        // Explicitly externalize modules that shouldn't be in the browser bundle
-        external: ['fs', 'path', 'canvas', 'http', 'https', 'url', 'zlib', 'stream'],
+        // This tells Rollup these modules are external and should not be bundled
+        external: ['fs', 'path', 'canvas', 'http', 'https', 'url', 'zlib', 'stream', 'util'],
       },
       commonjsOptions: {
         transformMixedEsModules: true,
@@ -44,12 +46,12 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-        // These aliases prevent the "unintended external module" error
-        // by pointing Node-only modules to an empty object.
-        'fs': 'shimmer',
-        'path': 'shimmer',
-        'stream': 'shimmer',
-        'zlib': 'shimmer',
+        // Comprehensive list of Node shims to prevent Render build crashes
+        'fs': path.resolve(__dirname, 'node_modules/vite/dist/client/env.mjs'),
+        'path': path.resolve(__dirname, 'node_modules/vite/dist/client/env.mjs'),
+        'stream': path.resolve(__dirname, 'node_modules/vite/dist/client/env.mjs'),
+        'zlib': path.resolve(__dirname, 'node_modules/vite/dist/client/env.mjs'),
+        'util': path.resolve(__dirname, 'node_modules/vite/dist/client/env.mjs'),
       },
     },
     define: {

@@ -2,11 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
-import { 
-  LogOut, 
-  PlusCircle, 
-  LayoutDashboard, 
-  ShieldCheck, 
+import {
+  LogOut,
+  PlusCircle,
+  LayoutDashboard,
+  ShieldCheck,
   Ticket,
   User,
   ListChecks,
@@ -16,10 +16,12 @@ import {
   X,
   Bell,
   Megaphone,
-  GraduationCap
+  GraduationCap,
+  HelpCircle
 } from "lucide-react";
 import { useNotifications } from "../context/NotificationContext";
 import NotificationsPanel from "./NotificationsPanel";
+import HelpAssistant from "./HelpAssistant";
 import { AnimatePresence } from "motion/react";
 
 export default function Navbar({ user, profile }) {
@@ -27,8 +29,9 @@ export default function Navbar({ user, profile }) {
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const notificationRef = useRef(null);
-  
+
   // Safe access to notification context
   let notificationsContext = { unreadCount: 0 };
   try {
@@ -75,24 +78,24 @@ export default function Navbar({ user, profile }) {
   return (
     <nav className="bg-white border-b border-zinc-200 sticky top-0 z-50">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-        
+
         {/* --- LOGO SECTION --- */}
         <Link to="/" className="flex items-center gap-2 md:gap-3 hover:opacity-90 transition-opacity shrink-0 relative z-50">
           {/* First Logo: SNMIMT */}
-          <img 
-            src="https://res.cloudinary.com/dtzdgkimi/image/upload/v1772819497/logo4_mswif1.png" 
-            alt="SNMIMT Logo" 
-            className="h-8 md:h-10 w-auto object-contain rounded-md" 
+          <img
+            src="https://res.cloudinary.com/dtzdgkimi/image/upload/v1772819497/logo4_mswif1.png"
+            alt="SNMIMT Logo"
+            className="h-8 md:h-10 w-auto object-contain rounded-md"
           />
-          
+
           {/* Subtle Vertical Divider */}
           <div className="h-6 md:h-8 w-px bg-zinc-200"></div>
-          
+
           {/* Second Logo: CampusBridge */}
-          <img 
-            src="https://res.cloudinary.com/dtzdgkimi/image/upload/v1772822941/Gemini_Generated_Image_rwqg4rwqg4rwqg4r_ojz2j1.png" 
-            alt="CampusBridge Logo" 
-            className="h-6 md:h-8 w-auto object-contain" 
+          <img
+            src="https://res.cloudinary.com/dtzdgkimi/image/upload/v1772822941/Gemini_Generated_Image_rwqg4rwqg4rwqg4r_ojz2j1.png"
+            alt="CampusBridge Logo"
+            className="h-6 md:h-8 w-auto object-contain"
           />
         </Link>
         {/* -------------------- */}
@@ -104,17 +107,17 @@ export default function Navbar({ user, profile }) {
               {profile && (
                 <>
                   {/* Dashboard and Complaints for all users */}
-                  <Link 
-                    to="/dashboard" 
+                  <Link
+                    to="/dashboard"
                     className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                     title="Dashboard"
                   >
                     <LayoutDashboard size={20} />
                     <span className="text-sm font-medium">Dashboard</span>
                   </Link>
-    
-                  <Link 
-                    to="/complaints" 
+
+                  <Link
+                    to="/complaints"
                     className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                     title="Complaints"
                   >
@@ -122,8 +125,8 @@ export default function Navbar({ user, profile }) {
                     <span className="text-sm font-medium">Complaints</span>
                   </Link>
 
-                  <Link 
-                    to="/notices" 
+                  <Link
+                    to="/notices"
                     className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                     title="Notice Board"
                   >
@@ -131,8 +134,8 @@ export default function Navbar({ user, profile }) {
                     <span className="text-sm font-medium">Notices</span>
                   </Link>
 
-                  <Link 
-                    to="/campus-connect" 
+                  <Link
+                    to="/campus-connect"
                     className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                     title="Campus Connect"
                   >
@@ -142,24 +145,24 @@ export default function Navbar({ user, profile }) {
 
                   {profile.role === "student" && (
                     <>
-                      <Link 
-                        to="/create-event" 
+                      <Link
+                        to="/create-event"
                         className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                         title="Host Event"
                       >
                         <PlusCircle size={20} />
                         <span className="text-sm font-medium">Host Event</span>
                       </Link>
-                      <Link 
-                        to="/my-registrations" 
+                      <Link
+                        to="/my-registrations"
                         className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                         title="My Tickets"
                       >
                         <Ticket size={20} />
                         <span className="text-sm font-medium">My Tickets</span>
                       </Link>
-                      <Link 
-                        to="/my-events" 
+                      <Link
+                        to="/my-events"
                         className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                         title="My Events"
                       >
@@ -169,9 +172,9 @@ export default function Navbar({ user, profile }) {
                     </>
                   )}
 
-                  {profile.role === "management" && (
-                    <Link 
-                      to="/management" 
+                  {(profile.role === "management" || profile.email === "campusbridgeofficials@gmail.com") && (
+                    <Link
+                      to="/management"
                       className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                       title="Management"
                     >
@@ -206,14 +209,23 @@ export default function Navbar({ user, profile }) {
                     </AnimatePresence>
                   </div>
 
-                  <Link 
-                    to="/account" 
+                  <Link
+                    to="/account"
                     className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
                     title="Account"
                   >
                     <User size={20} />
                     <span className="text-sm font-medium">Account</span>
                   </Link>
+
+                  <button
+                    onClick={() => setShowHelp(true)}
+                    className="p-2 text-zinc-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all flex items-center gap-2"
+                    title="Help Assistant"
+                  >
+                    <HelpCircle size={20} />
+                    <span className="text-sm font-medium">Help</span>
+                  </button>
 
                   <div className="h-6 w-px bg-zinc-200 mx-2" />
                 </>
@@ -230,14 +242,22 @@ export default function Navbar({ user, profile }) {
             </>
           ) : (
             <div className="flex items-center gap-2">
-              <Link 
-                to="/login" 
+              <button
+                onClick={() => setShowHelp(true)}
+                className="p-2 text-zinc-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all flex items-center gap-2 mr-2"
+                title="Help Assistant"
+              >
+                <HelpCircle size={20} />
+                <span className="text-sm font-medium">Help</span>
+              </button>
+              <Link
+                to="/login"
                 className="px-4 py-2 text-sm font-bold text-zinc-600 hover:text-zinc-900 transition-colors"
               >
                 Login
               </Link>
-              <Link 
-                to="/login" 
+              <Link
+                to="/login"
                 className="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
               >
                 Sign Up
@@ -248,25 +268,34 @@ export default function Navbar({ user, profile }) {
 
         {/* Mobile Menu Button & Notification */}
         <div className="lg:hidden flex items-center gap-2">
+          {!user && (
+            <button
+              onClick={() => setShowHelp(true)}
+              className="p-2 text-zinc-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+              title="Help Assistant"
+            >
+              <HelpCircle size={24} />
+            </button>
+          )}
           {user && profile && (
-             <div className="relative" ref={notificationRef}>
-             <button
-               onClick={() => setShowNotifications(!showNotifications)}
-               className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all relative"
-             >
-               <Bell size={24} />
-               {unreadCount > 0 && (
-                 <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white" />
-               )}
-             </button>
-             <AnimatePresence>
+            <div className="relative" ref={notificationRef}>
+              <button
+                onClick={() => setShowNotifications(!showNotifications)}
+                className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all relative"
+              >
+                <Bell size={24} />
+                {unreadCount > 0 && (
+                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white" />
+                )}
+              </button>
+              <AnimatePresence>
                 {showNotifications && (
                   <NotificationsPanel onClose={() => setShowNotifications(false)} />
                 )}
               </AnimatePresence>
-           </div>
+            </div>
           )}
-          <button 
+          <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all relative z-50"
           >
@@ -299,32 +328,36 @@ export default function Navbar({ user, profile }) {
                       </div>
 
                       {/* Dashboard and Complaints for all users */}
-                      <Link 
-                        to="/dashboard" 
+                      <Link
+                        to="/dashboard"
+                        onClick={() => setIsMenuOpen(false)}
                         className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                       >
                         <LayoutDashboard size={24} />
                         <span className="font-bold">Dashboard</span>
                       </Link>
-        
-                      <Link 
-                        to="/complaints" 
+
+                      <Link
+                        to="/complaints"
+                        onClick={() => setIsMenuOpen(false)}
                         className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                       >
                         <MessageSquareWarning size={24} />
                         <span className="font-bold">Complaints</span>
                       </Link>
 
-                      <Link 
-                        to="/notices" 
+                      <Link
+                        to="/notices"
+                        onClick={() => setIsMenuOpen(false)}
                         className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                       >
                         <Megaphone size={24} />
                         <span className="font-bold">Notice Board</span>
                       </Link>
 
-                      <Link 
-                        to="/campus-connect" 
+                      <Link
+                        to="/campus-connect"
+                        onClick={() => setIsMenuOpen(false)}
                         className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                       >
                         <GraduationCap size={24} />
@@ -333,22 +366,25 @@ export default function Navbar({ user, profile }) {
 
                       {profile.role === "student" && (
                         <>
-                          <Link 
-                            to="/create-event" 
+                          <Link
+                            to="/create-event"
+                            onClick={() => setIsMenuOpen(false)}
                             className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                           >
                             <PlusCircle size={24} />
                             <span className="font-bold">Host Event</span>
                           </Link>
-                          <Link 
-                            to="/my-registrations" 
+                          <Link
+                            to="/my-registrations"
+                            onClick={() => setIsMenuOpen(false)}
                             className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                           >
                             <Ticket size={24} />
                             <span className="font-bold">My Tickets</span>
                           </Link>
-                          <Link 
-                            to="/my-events" 
+                          <Link
+                            to="/my-events"
+                            onClick={() => setIsMenuOpen(false)}
                             className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                           >
                             <ListChecks size={24} />
@@ -357,9 +393,10 @@ export default function Navbar({ user, profile }) {
                         </>
                       )}
 
-                      {profile.role === "management" && (
-                        <Link 
-                          to="/management" 
+                      {(profile.role === "management" || profile.email === "campusbridgeofficials@gmail.com") && (
+                        <Link
+                          to="/management"
+                          onClick={() => setIsMenuOpen(false)}
                           className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                         >
                           <ShieldCheck size={24} />
@@ -367,8 +404,9 @@ export default function Navbar({ user, profile }) {
                         </Link>
                       )}
 
-                      <Link 
-                        to="/account" 
+                      <Link
+                        to="/account"
+                        onClick={() => setIsMenuOpen(false)}
                         className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
                       >
                         <User size={24} />
@@ -378,6 +416,16 @@ export default function Navbar({ user, profile }) {
                   )}
 
                   <div className="my-4 border-t border-zinc-100 pt-4">
+                    <button
+                      onClick={() => {
+                        setShowHelp(true);
+                        setIsMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-4 p-4 text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all"
+                    >
+                      <HelpCircle size={24} />
+                      <span className="font-bold">Help Assistant</span>
+                    </button>
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center gap-4 p-4 text-red-500 hover:bg-red-50 rounded-2xl transition-all"
@@ -389,14 +437,26 @@ export default function Navbar({ user, profile }) {
                 </>
               ) : (
                 <div className="flex flex-col gap-4">
-                  <Link 
-                    to="/login" 
+                  <button
+                    onClick={() => {
+                      setShowHelp(true);
+                      setIsMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-4 p-4 text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all"
+                  >
+                    <HelpCircle size={24} />
+                    <span className="font-bold">Help Assistant</span>
+                  </button>
+                  <Link
+                    to="/login"
+                    onClick={() => setIsMenuOpen(false)}
                     className="w-full py-4 text-center font-bold text-zinc-900 border border-zinc-200 rounded-2xl hover:bg-zinc-50 transition-all"
                   >
                     Login
                   </Link>
-                  <Link 
-                    to="/login" 
+                  <Link
+                    to="/login"
+                    onClick={() => setIsMenuOpen(false)}
                     className="w-full py-4 text-center font-bold bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
                   >
                     Sign Up
@@ -407,6 +467,8 @@ export default function Navbar({ user, profile }) {
           </div>
         )}
       </div>
+
+      <HelpAssistant isOpen={showHelp} onClose={() => setShowHelp(false)} />
     </nav>
   );
 }

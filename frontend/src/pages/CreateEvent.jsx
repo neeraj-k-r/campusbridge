@@ -56,6 +56,7 @@ export default function CreateEvent({ profile }) {
   });
 
   const [departments, setDepartments] = useState([]);
+  const [aiGenerated, setAiGenerated] = useState(null);
 
   useEffect(() => {
     const q = collection(db, "departmentCapacity");
@@ -88,11 +89,19 @@ export default function CreateEvent({ profile }) {
     });
   };
 
-  const [aiGenerated, setAiGenerated] = useState(null);
+  // --- NEW: Validation Function ---
+  const validateForm = () => {
+    const { title, date, time, location, hostName, capacity } = formData;
+    if (!title.trim() || !date || !time || !location.trim() || !hostName.trim() || !capacity) {
+      return false;
+    }
+    return true;
+  };
 
   const handleGenerate = async () => {
-    if (!formData.title || !formData.date || !formData.location) {
-      toast.error("Please fill in the basic details first");
+    // Check validation before generating
+    if (!validateForm()) {
+      toast.error("Please fill in all required fields (Title, Host, Date, Time, Location, Capacity) first.");
       return;
     }
 
@@ -176,10 +185,16 @@ export default function CreateEvent({ profile }) {
   const handleSubmit = async () => {
     if (!profile) return;
 
-    // FIX: Check description based on which step/mode the user is in
+    // Check validation before submitting
+    if (!validateForm()) {
+      toast.error("Please fill in all required fields (Title, Host, Date, Time, Location, Capacity) first.");
+      return;
+    }
+
+    // Use AI poster if in Step 2, otherwise use manual upload
     const finalDescription = step === 2 ? aiGenerated?.description : manualDescription;
 
-    if (!finalDescription) {
+    if (!finalDescription?.trim()) {
       toast.error("Please provide a description.");
       return;
     }
@@ -188,7 +203,6 @@ export default function CreateEvent({ profile }) {
     try {
       let downloadUrl = "";
 
-      // FIX: Use AI poster if in Step 2, otherwise use manual upload
       if (step === 2 && aiGenerated?.posterUrl) {
         downloadUrl = aiGenerated.posterUrl;
       } else if (manualPosterFile) {
@@ -235,7 +249,7 @@ export default function CreateEvent({ profile }) {
 
       await addDoc(collection(db, "events"), eventData);
 
-      // --- NOTIFICATION LOGIC (ALREADY PERFECT) ---
+      // --- NOTIFICATION LOGIC ---
       await sendNotification({
         title: "New Event Request",
         message: `${profile.displayName} has requested approval for "${formData.title}"`,
@@ -265,7 +279,6 @@ export default function CreateEvent({ profile }) {
             setShowCropper(false);
             setTempImage(null);
           }}
-        // Removed the strict 16/9 aspect ratio here
         />
       )}
       <header className="mb-12 text-center max-w-2xl mx-auto">
@@ -333,7 +346,7 @@ export default function CreateEvent({ profile }) {
                   </h3>
                   <div className="space-y-6">
                     <div>
-                      <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Event Title</label>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Event Title *</label>
                       <input
                         type="text"
                         required
@@ -344,7 +357,7 @@ export default function CreateEvent({ profile }) {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Event Host</label>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Event Host *</label>
                       <input
                         type="text"
                         required
@@ -356,7 +369,7 @@ export default function CreateEvent({ profile }) {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Date</label>
+                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Date *</label>
                         <div className="relative">
                           <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
                           <input
@@ -369,7 +382,7 @@ export default function CreateEvent({ profile }) {
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Time</label>
+                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Time *</label>
                         <div className="relative">
                           <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
                           <input
@@ -383,7 +396,7 @@ export default function CreateEvent({ profile }) {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Location</label>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Location *</label>
                       <div className="relative">
                         <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
                         <input
@@ -407,7 +420,7 @@ export default function CreateEvent({ profile }) {
                   <div className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Maximum Capacity</label>
+                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Maximum Capacity *</label>
                         <div className="relative">
                           <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
                           <input
@@ -535,7 +548,8 @@ export default function CreateEvent({ profile }) {
                 <div className="pt-4">
                   <button
                     onClick={handleSubmit}
-                    disabled={loading || !manualDescription}
+                    // Button disabled if form is invalid OR description is empty
+                    disabled={loading || !manualDescription.trim() || !validateForm()}
                     className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-zinc-900/20 hover:shadow-2xl hover:shadow-zinc-900/30 hover:-translate-y-1"
                   >
                     {loading ? (
@@ -549,8 +563,9 @@ export default function CreateEvent({ profile }) {
                   </button>
                   <button
                     onClick={handleGenerate}
-                    disabled={generating}
-                    className="w-full mt-4 bg-emerald-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all disabled:opacity-50 shadow-xl shadow-emerald-600/20 hover:shadow-2xl hover:-translate-y-1"
+                    // AI Gen disabled if required form details are missing
+                    disabled={generating || !validateForm()}
+                    className="w-full mt-4 bg-emerald-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-emerald-600/20 hover:shadow-2xl hover:-translate-y-1"
                   >
                     {generating ? (
                       <>
@@ -582,7 +597,6 @@ export default function CreateEvent({ profile }) {
                   <ImageIcon size={20} />
                   <span>AI Generated Poster</span>
                 </div>
-                {/* Changed object-cover to object-contain here to ensure AI poster is not cropped either */}
                 <div className="aspect-[3/4] rounded-3xl overflow-hidden border border-zinc-200 shadow-lg bg-zinc-100 flex items-center justify-center">
                   <img
                     src={aiGenerated?.posterUrl}
@@ -614,7 +628,7 @@ export default function CreateEvent({ profile }) {
               <button
                 onClick={handleGenerate}
                 disabled={generating}
-                className="flex-1 py-4 px-6 rounded-2xl border border-zinc-200 font-bold text-zinc-600 hover:bg-zinc-50 transition-all flex items-center justify-center gap-2"
+                className="flex-1 py-4 px-6 rounded-2xl border border-zinc-200 font-bold text-zinc-600 hover:bg-zinc-50 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {generating ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
                 Regenerate Content

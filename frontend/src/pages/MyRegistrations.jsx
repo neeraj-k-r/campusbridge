@@ -3,7 +3,7 @@ import { collection, query, where, getDocs, onSnapshot, documentId } from "fireb
 import { db } from "../firebase";
 import { Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { Ticket, Calendar, MapPin, ArrowRight, CheckCircle2, Clock, QrCode, Loader2 } from "lucide-react";
+import { Ticket, Calendar, MapPin, ArrowRight, CheckCircle2, Clock, QrCode, Loader2, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "../lib/utils";
@@ -11,6 +11,18 @@ import { cn } from "../lib/utils";
 export default function MyRegistrations({ profile }) {
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // State to hold the rotating timestamp for QR tampering prevention
+  const [qrTimestamp, setQrTimestamp] = useState(Date.now());
+
+  // Automatically refresh the QR code timestamp every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setQrTimestamp(Date.now());
+    }, 30000); // 30000ms = 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!profile) return;
@@ -20,7 +32,7 @@ export default function MyRegistrations({ profile }) {
       where("studentId", "==", profile.uid)
     );
 
-    const unsubscribe = onSnapshot(q, 
+    const unsubscribe = onSnapshot(q,
       async (querySnapshot) => {
         const regs = querySnapshot.docs.map(doc => ({
           id: doc.id,
@@ -36,12 +48,12 @@ export default function MyRegistrations({ profile }) {
         // Fetch event details
         const eventIds = [...new Set(regs.map(r => r.eventId))];
         const eventsMap = {};
-        
+
         try {
           // Fetch events in parallel
           const eventPromises = eventIds.map(id => getDocs(query(collection(db, "events"), where(documentId(), "==", id))));
           const eventSnapshots = await Promise.all(eventPromises);
-          
+
           eventSnapshots.forEach(snap => {
             if (!snap.empty) {
               const doc = snap.docs[0];
@@ -124,13 +136,20 @@ export default function MyRegistrations({ profile }) {
               <div className="w-full md:w-64 bg-zinc-900 p-8 flex flex-col items-center justify-center relative overflow-hidden shrink-0">
                 <div className="absolute inset-0 bg-gradient-to-br from-zinc-800 to-zinc-900" />
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 via-blue-500 to-purple-600" />
-                
+
                 {/* Perforations */}
                 <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-full z-10 hidden md:block" />
                 <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-full z-10 hidden md:block" />
-                
+
                 <div className="relative bg-white p-3 rounded-xl shadow-lg mb-4 group-hover:scale-105 transition-transform duration-500">
-                  <QRCodeSVG value={reg.qrCodeData} size={140} />
+                  <QRCodeSVG
+                    value={btoa(JSON.stringify({
+                      eventId: reg.eventId,
+                      studentId: reg.studentId,
+                      timestamp: qrTimestamp // Uses the rotating timestamp
+                    }))}
+                    size={140}
+                  />
                 </div>
                 <div className="relative text-center">
                   <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-[0.2em] mb-1">Entry Pass</p>
@@ -147,13 +166,13 @@ export default function MyRegistrations({ profile }) {
                   <div className="flex items-center justify-between mb-6">
                     <div className={cn(
                       "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5",
-                      reg.attended 
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-100" 
+                      reg.attended
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
                         : reg.status === "pending"
-                        ? "bg-amber-50 text-amber-700 border-amber-100"
-                        : reg.status === "rejected"
-                        ? "bg-red-50 text-red-700 border-red-100"
-                        : "bg-blue-50 text-blue-700 border-blue-100"
+                          ? "bg-amber-50 text-amber-700 border-amber-100"
+                          : reg.status === "rejected"
+                            ? "bg-red-50 text-red-700 border-red-100"
+                            : "bg-blue-50 text-blue-700 border-blue-100"
                     )}>
                       {reg.attended ? (
                         <>
@@ -181,11 +200,11 @@ export default function MyRegistrations({ profile }) {
                       {format(new Date(reg.registeredAt), "MMM d")}
                     </span>
                   </div>
-                  
+
                   <h3 className="text-2xl font-bold text-zinc-900 mb-2 line-clamp-1 group-hover:text-emerald-600 transition-colors">
                     {reg.event?.title || "Unknown Event"}
                   </h3>
-                  
+
                   <div className="space-y-3 mt-6">
                     <div className="flex items-center gap-3 text-zinc-600">
                       <div className="w-8 h-8 rounded-full bg-zinc-50 flex items-center justify-center text-zinc-400 shrink-0">

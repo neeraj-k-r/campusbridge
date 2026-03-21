@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { jsPDF } from "jspdf";
+import jsPDF from "jspdf"; // Fixed import
 import autoTable from "jspdf-autotable";
 import {
   doc,
@@ -59,7 +59,18 @@ export default function EventDetails({ profile }) {
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [attendees, setAttendees] = useState([]);
 
+  // Rotating timestamp for live QR code updates (Anti-screenshot)
+  const [qrTimestamp, setQrTimestamp] = useState(Date.now());
+
   const { sendNotification } = useNotifications();
+
+  // Update QR timestamp every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setQrTimestamp(Date.now());
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!id || !profile) return;
@@ -185,21 +196,11 @@ export default function EventDetails({ profile }) {
       const requiresApproval = event.requiresApproval || false;
       const status = requiresApproval ? "pending" : "approved";
 
-      let qrCodeData = null;
-      if (status === "approved") {
-        qrCodeData = btoa(JSON.stringify({
-          eventId: id,
-          studentId: profile.uid,
-          timestamp: Date.now()
-        }));
-      }
-
       const regData = {
         eventId: id,
         studentId: profile.uid,
         studentName: profile.displayName,
         studentEmail: profile.email,
-        qrCodeData,
         attended: false,
         status: status,
         registeredAt: Date.now(),
@@ -225,7 +226,6 @@ export default function EventDetails({ profile }) {
             type: "INFO"
           });
         }
-
         toast.success("Successfully registered for the event!");
       } else {
         if (event.hostId) {
@@ -251,15 +251,8 @@ export default function EventDetails({ profile }) {
 
   const handleApproveRegistration = async (regId, studentId) => {
     try {
-      const qrCodeData = btoa(JSON.stringify({
-        eventId: id,
-        studentId: studentId,
-        timestamp: Date.now()
-      }));
-
       await updateDoc(doc(db, "registrations", regId), {
-        status: "approved",
-        qrCodeData: qrCodeData
+        status: "approved"
       });
 
       await updateDoc(doc(db, "events", id), {
@@ -305,6 +298,15 @@ export default function EventDetails({ profile }) {
         toast.error("Invalid QR code for this event");
         return;
       }
+
+      // --- TIMESTAMP VALIDATION (Screenshot Prevention) ---
+      const THRESHOLD = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const now = Date.now();
+      if (now - decoded.timestamp > THRESHOLD) {
+        toast.error("Ticket expired! Please refresh your pass. (Screenshots are not allowed)");
+        return;
+      }
+      // ----------------------------------------------------
 
       const q = query(
         collection(db, "registrations"),
@@ -648,7 +650,7 @@ export default function EventDetails({ profile }) {
                       </div>
                     </div>
 
-                    {/* ALWAYS VISIBLE Host Approval Controls with Text (Alphabets) */}
+                    {/* ALWAYS VISIBLE Host Approval Controls with Text */}
                     {isHost && attendee.status === "pending" && (
                       <div className="flex gap-2 pt-2 border-t border-zinc-50">
                         <button
@@ -899,7 +901,15 @@ export default function EventDetails({ profile }) {
                           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 via-blue-500 to-purple-600" />
 
                           <div className="relative bg-white p-4 rounded-2xl shadow-lg mb-6 group-hover:scale-105 transition-transform duration-500">
-                            <QRCodeSVG value={registration.qrCodeData} size={180} />
+                            {/* DYNAMIC TIMESTAMP QR CODE */}
+                            <QRCodeSVG
+                              value={btoa(JSON.stringify({
+                                eventId: registration.eventId,
+                                studentId: registration.studentId,
+                                timestamp: qrTimestamp
+                              }))}
+                              size={180}
+                            />
                           </div>
                           <p className="relative text-xs font-bold text-zinc-400 uppercase tracking-widest text-center mb-1">
                             Entry Pass

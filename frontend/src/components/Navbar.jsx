@@ -17,7 +17,8 @@ import {
   Bell,
   Megaphone,
   GraduationCap,
-  HelpCircle
+  HelpCircle,
+  Bus // <-- Added Bus icon here
 } from "lucide-react";
 import { useNotifications } from "../context/NotificationContext";
 import NotificationsPanel from "./NotificationsPanel";
@@ -142,6 +143,18 @@ export default function Navbar({ user, profile }) {
                     <GraduationCap size={20} />
                     <span className="text-sm font-medium">Campus Connect</span>
                   </Link>
+
+                  {/* --- NEW EXTERNAL BUS TRACKER LINK (DESKTOP) --- */}
+                  <a
+                    href="https://campusbridgebustracker.netlify.app/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
+                    title="Bus Tracker"
+                  >
+                    <Bus size={20} />
+                    <span className="text-sm font-medium">Bus Tracker</span>
+                  </a>
 
                   {profile.role === "student" && (
                     <>
@@ -363,6 +376,18 @@ export default function Navbar({ user, profile }) {
                         <GraduationCap size={24} />
                         <span className="font-bold">Campus Connect</span>
                       </Link>
+
+                      {/* --- NEW EXTERNAL BUS TRACKER LINK (MOBILE) --- */}
+                      <a
+                        href="https://campusbridgebustracker.netlify.app/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setIsMenuOpen(false)}
+                        className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
+                      >
+                        <Bus size={24} />
+                        <span className="font-bold">Bus Tracker</span>
+                      </a>
 
                       {profile.role === "student" && (
                         <>

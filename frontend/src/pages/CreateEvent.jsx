@@ -224,7 +224,7 @@ export default function CreateEvent({ profile }) {
         downloadUrl = `https://picsum.photos/seed/${formData.title.replace(/\s+/g, '')}/800/600`;
       }
 
-      // 🔥 NEW MULTI-STEP APPROVAL LOGIC PAYLOAD 🔥
+      // 🔥 MULTI-STEP APPROVAL LOGIC PAYLOAD 🔥
       const eventData = {
         ...formData,
         description: finalDescription,
@@ -238,9 +238,9 @@ export default function CreateEvent({ profile }) {
         hostBatch: profile.yearOfJoin || "",
 
         // The Status Engine
-        status: "pending", // Remains pending until the Principal says yes
-        approvalStage: profile.role === "student" ? "tutor" : "principal", // Students start at tutor, others skip
-        stageUpdatedAt: Date.now(), // 🕒 The 2.5 hour clock starts NOW
+        status: "pending",
+        approvalStage: profile.role === "student" ? "tutor" : "principal",
+        stageUpdatedAt: Date.now(),
 
         // Rejection tracking
         rejectionReason: "",
@@ -256,15 +256,14 @@ export default function CreateEvent({ profile }) {
 
       await addDoc(collection(db, "events"), eventData);
 
-      // --- SMART NOTIFICATION LOGIC ---
-      // Notify the correct department/tutor or management based on the starting stage
-      const targetRecipients = profile.role === "student" ? [`dept_${profile.department}`] : ["role_management"];
-
+      // --- 🔥 FIX: SMART NOTIFICATION LOGIC 🔥 ---
+      // Send the notification STRICTLY to the host who created it.
+      // Other students will not be notified until the Principal approves it.
       await sendNotification({
-        title: "New Event Approval Request",
-        message: `${profile.displayName} has requested approval for "${formData.title}"`,
-        link: profile.role === "student" ? "/tutor-section" : "/management",
-        recipients: targetRecipients,
+        title: "Event Submitted for Approval",
+        message: `Your event "${formData.title}" has been sent to your Tutor.`,
+        link: "/my-events",
+        recipients: [profile.uid], // ONLY the creator's UID
         type: "EVENT"
       });
 

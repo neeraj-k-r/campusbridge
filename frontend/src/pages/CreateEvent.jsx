@@ -89,7 +89,6 @@ export default function CreateEvent({ profile }) {
     });
   };
 
-  // --- NEW: Validation Function ---
   const validateForm = () => {
     const { title, date, time, location, hostName, capacity } = formData;
     if (!title.trim() || !date || !time || !location.trim() || !hostName.trim() || !capacity) {
@@ -99,7 +98,6 @@ export default function CreateEvent({ profile }) {
   };
 
   const handleGenerate = async () => {
-    // Check validation before generating
     if (!validateForm()) {
       toast.error("Please fill in all required fields (Title, Host, Date, Time, Location, Capacity) first.");
       return;
@@ -133,15 +131,11 @@ export default function CreateEvent({ profile }) {
     setIsEnhancing(true);
 
     try {
-      // Connect to your specific Hugging Face Space
       const client = await Client.connect("Hiraj/event-ai-generator");
-
-      // Call the endpoint with the user's current description
       const result = await client.predict("/generate_event", {
         details: manualDescription,
       });
 
-      // Gradio returns the output in a data array. We grab the first item.
       if (result && result.data && result.data.length > 0) {
         setManualDescription(result.data[0]);
         toast.success("Description enhanced by AI!");
@@ -185,13 +179,11 @@ export default function CreateEvent({ profile }) {
   const handleSubmit = async () => {
     if (!profile) return;
 
-    // Check validation before submitting
     if (!validateForm()) {
-      toast.error("Please fill in all required fields (Title, Host, Date, Time, Location, Capacity) first.");
+      toast.error("Please fill in all required fields first.");
       return;
     }
 
-    // Use AI poster if in Step 2, otherwise use manual upload
     const finalDescription = step === 2 ? aiGenerated?.description : manualDescription;
 
     if (!finalDescription?.trim()) {
@@ -232,13 +224,28 @@ export default function CreateEvent({ profile }) {
         downloadUrl = `https://picsum.photos/seed/${formData.title.replace(/\s+/g, '')}/800/600`;
       }
 
+      // 🔥 NEW MULTI-STEP APPROVAL LOGIC PAYLOAD 🔥
       const eventData = {
         ...formData,
         description: finalDescription,
         posterUrl: downloadUrl,
         hostId: profile.uid,
         hostName: formData.hostName,
-        status: "pending",
+
+        // Critical tracking data for routing
+        hostRole: profile.role || "user",
+        hostDepartment: profile.department || "",
+        hostBatch: profile.yearOfJoin || "",
+
+        // The Status Engine
+        status: "pending", // Remains pending until the Principal says yes
+        approvalStage: profile.role === "student" ? "tutor" : "principal", // Students start at tutor, others skip
+        stageUpdatedAt: Date.now(), // 🕒 The 2.5 hour clock starts NOW
+
+        // Rejection tracking
+        rejectionReason: "",
+        rejectedByRole: "",
+
         createdAt: Date.now(),
         registeredCount: 0,
       };
@@ -249,17 +256,19 @@ export default function CreateEvent({ profile }) {
 
       await addDoc(collection(db, "events"), eventData);
 
-      // --- NOTIFICATION LOGIC ---
+      // --- SMART NOTIFICATION LOGIC ---
+      // Notify the correct department/tutor or management based on the starting stage
+      const targetRecipients = profile.role === "student" ? [`dept_${profile.department}`] : ["role_management"];
+
       await sendNotification({
-        title: "New Event Request",
+        title: "New Event Approval Request",
         message: `${profile.displayName} has requested approval for "${formData.title}"`,
-        link: `/management`,
-        recipients: ["role_management"],
+        link: profile.role === "student" ? "/tutor-section" : "/management",
+        recipients: targetRecipients,
         type: "EVENT"
       });
-      // --- END NOTIFICATION LOGIC ---
 
-      toast.success("Event submitted for approval!");
+      toast.success("Event submitted to your Tutor for approval!");
       navigate("/");
     } catch (error) {
       console.error("Submission error:", error);
@@ -548,7 +557,6 @@ export default function CreateEvent({ profile }) {
                 <div className="pt-4">
                   <button
                     onClick={handleSubmit}
-                    // Button disabled if form is invalid OR description is empty
                     disabled={loading || !manualDescription.trim() || !validateForm()}
                     className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-zinc-900/20 hover:shadow-2xl hover:shadow-zinc-900/30 hover:-translate-y-1"
                   >
@@ -563,7 +571,6 @@ export default function CreateEvent({ profile }) {
                   </button>
                   <button
                     onClick={handleGenerate}
-                    // AI Gen disabled if required form details are missing
                     disabled={generating || !validateForm()}
                     className="w-full mt-4 bg-emerald-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-emerald-600/20 hover:shadow-2xl hover:-translate-y-1"
                   >

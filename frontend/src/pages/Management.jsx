@@ -5,7 +5,7 @@ import { db, auth } from "../firebase";
 import ImageCropper from "../components/ImageCropper";
 import { toast } from "react-hot-toast";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle2, XCircle, Clock, Calendar, User, Eye, Loader2, Plus, Trash2, Sparkles, Users, ShieldCheck, Edit2, Megaphone, Image as ImageIcon, Send, GraduationCap, Search } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Calendar, User, Eye, Loader2, Plus, Trash2, Sparkles, Users, ShieldCheck, Edit2, Megaphone, Image as ImageIcon, Send, GraduationCap, Search, Forward } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "react-router-dom";
 import { cn } from "../lib/utils";
@@ -14,6 +14,25 @@ import { useNotifications } from "../context/NotificationContext";
 // Cloudinary Config
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "dbyraj0xm";
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "campus_posters";
+
+const STAGE_TIMEOUT = 24 * 60 * 60 * 1000; // 24 Hours
+
+const getEffectiveStage = (event) => {
+  if (event.status !== "pending") return event.status;
+  const now = Date.now();
+  const timeSpent = now - (event.stageUpdatedAt || event.createdAt);
+
+  if (event.approvalStage === "tutor") {
+    if (timeSpent > STAGE_TIMEOUT * 2) return "principal";
+    if (timeSpent > STAGE_TIMEOUT) return "hod";
+    return "tutor";
+  }
+  if (event.approvalStage === "hod") {
+    if (timeSpent > STAGE_TIMEOUT) return "principal";
+    return "hod";
+  }
+  return event.approvalStage || "principal";
+};
 
 export default function Management({ profile }) {
   const [pendingEvents, setPendingEvents] = useState([]);
@@ -65,6 +84,7 @@ export default function Management({ profile }) {
     (profile?.role === "management" && !!hodDepartment && !isDeveloper);
 
   const isManagementStaff = profile?.type === "manager" || profile?.type === "principal" || (profile?.role === "management" && !isHOD && !isDeveloper);
+  const isPrincipal = profile?.type === "principal" || isDeveloper || (profile?.role === "management" && !isHOD);
 
   useEffect(() => {
     if (isHOD && hodDepartment && !editingCapacity) {
@@ -216,6 +236,108 @@ export default function Management({ profile }) {
       unsubscribePendingUsers();
     };
   }, [profile, isDeveloper, isHOD, isManagementStaff, hodDepartment]);
+
+  // 🔥 Intelligent Event Filtering based on the 2.5-hour timeouts 🔥
+  const myPendingEvents = pendingEvents.filter(event => {
+    const effectiveStage = getEffectiveStage(event);
+
+    if (isHOD && !isPrincipal) {
+      return effectiveStage === "hod" && event.hostDepartment?.toUpperCase() === hodDepartment;
+    }
+    if (isPrincipal) {
+      return effectiveStage === "principal";
+    }
+    return false;
+  });
+
+  const handleApproveEvent = async (event) => {
+    setProcessing(event.id);
+    try {
+      const effectiveStage = getEffectiveStage(event);
+
+      if (isHOD && !isPrincipal && effectiveStage === "hod") {
+        // Forward to Principal
+        await updateDoc(doc(db, "events", event.id), {
+          approvalStage: "principal",
+          stageUpdatedAt: Date.now()
+        });
+
+        await sendNotification({
+          title: "Event Forwarded to Principal",
+          message: `Your event was approved by the HOD and sent to the Principal.`,
+          link: `/my-events`,
+          recipients: [event.hostId],
+          type: "EVENT"
+        });
+        toast.success("Approved and forwarded to Principal!");
+
+      } else if (isPrincipal && effectiveStage === "principal") {
+        // Final Approval! Post to Dashboard!
+        await updateDoc(doc(db, "events", event.id), { status: "approved" });
+
+        await sendNotification({
+          title: "Event Officially Approved!",
+          message: `Your event "${event.title}" is now live on the dashboard!`,
+          link: `/event/${event.id}`,
+          recipients: [event.hostId],
+          type: "EVENT"
+        });
+
+        // Notify Everyone!
+        await sendNotification({
+          title: "New Event Announced!",
+          message: `"${event.title}" is now open. Check it out!`,
+          link: `/event/${event.id}`,
+          recipients: ["all"],
+          type: "EVENT"
+        });
+        toast.success("Event fully approved and published!");
+      }
+    } catch (error) {
+      toast.error("Failed to update event status.");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const confirmRejection = async () => {
+    if (!selectedEventId || !rejectionReason.trim()) {
+      toast.error("Please provide a reason for rejection.");
+      return;
+    }
+
+    setProcessing(selectedEventId);
+    try {
+      const event = pendingEvents.find(e => e.id === selectedEventId);
+      const rejectorRole = isPrincipal ? "Principal / Admin" : `HOD of ${hodDepartment}`;
+
+      await updateDoc(doc(db, "events", selectedEventId), {
+        status: "rejected",
+        rejectionReason: rejectionReason.trim(),
+        rejectedByRole: rejectorRole
+      });
+
+      if (event && event.hostId) {
+        await sendNotification({
+          title: "Event Rejected",
+          message: `Your event "${event.title}" was rejected by ${rejectorRole}. Reason: ${rejectionReason.trim()}`,
+          link: `/my-events`,
+          recipients: [event.hostId],
+          type: "EVENT"
+        });
+      }
+
+      toast.success("Event rejected successfully!");
+      setRejectModalOpen(false);
+      setRejectionReason("");
+      setSelectedEventId(null);
+    } catch (error) {
+      console.error("Status update error:", error);
+      toast.error("Failed to reject event.");
+    } finally {
+      setProcessing(null);
+    }
+  };
 
   const handleAdFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -554,57 +676,6 @@ export default function Management({ profile }) {
     }
   };
 
-  const handleStatusUpdate = async (eventId, status) => {
-    if (status === "rejected") {
-      setSelectedEventId(eventId);
-      setRejectModalOpen(true);
-      return;
-    }
-
-    setProcessing(eventId);
-    try {
-      await updateDoc(doc(db, "events", eventId), { status });
-
-      const event = pendingEvents.find(e => e.id === eventId);
-      if (event) {
-        if (event.hostId) {
-          await sendNotification({
-            title: `Event ${status === "approved" ? "Approved" : "Rejected"}`,
-            message: `Your event "${event.title}" has been ${status}.`,
-            link: `/my-events`,
-            recipients: [event.hostId],
-            type: "EVENT"
-          });
-        }
-
-        if (status === "approved") {
-          await sendNotification({
-            title: "New Event Announced!",
-            message: `"${event.title}" is now open for registration. Check it out!`,
-            link: `/event/${eventId}`,
-            recipients: ["role_student"],
-            type: "EVENT"
-          });
-
-          await sendNotification({
-            title: "Event Approved",
-            message: `You successfully approved "${event.title}".`,
-            link: `/event/${eventId}`,
-            recipients: ["role_management"],
-            type: "INFO"
-          });
-        }
-      }
-
-      toast.success(`Event ${status === "approved" ? "approved" : "rejected"} successfully!`);
-    } catch (error) {
-      console.error("Status update error:", error);
-      toast.error("Failed to update event status.");
-    } finally {
-      setProcessing(null);
-    }
-  };
-
   const handleApproveUser = async (userId) => {
     setProcessing(userId);
     try {
@@ -630,7 +701,6 @@ export default function Management({ profile }) {
     }
   };
 
-  // 🔥 FIX: Now completely wipes the rejected user data 🔥
   const handleRejectUser = async () => {
     if (!managerToReject) return;
     setProcessing(managerToReject);
@@ -669,42 +739,6 @@ export default function Management({ profile }) {
     } catch (error) {
       console.error("Assign tutor error:", error);
       toast.error("Failed to assign tutor: " + error.message);
-    }
-  };
-
-  const confirmRejection = async () => {
-    if (!selectedEventId || !rejectionReason.trim()) {
-      toast.error("Please provide a reason for rejection.");
-      return;
-    }
-
-    setProcessing(selectedEventId);
-    try {
-      await updateDoc(doc(db, "events", selectedEventId), {
-        status: "rejected",
-        rejectionReason: rejectionReason.trim()
-      });
-
-      const event = pendingEvents.find(e => e.id === selectedEventId);
-      if (event && event.hostId) {
-        await sendNotification({
-          title: "Event Rejected",
-          message: `Your event "${event.title}" has been rejected. Reason: ${rejectionReason.trim()}`,
-          link: `/my-events`,
-          recipients: [event.hostId],
-          type: "EVENT"
-        });
-      }
-
-      toast.success("Event rejected successfully!");
-      setRejectModalOpen(false);
-      setRejectionReason("");
-      setSelectedEventId(null);
-    } catch (error) {
-      console.error("Status update error:", error);
-      toast.error("Failed to reject event.");
-    } finally {
-      setProcessing(null);
     }
   };
 
@@ -761,8 +795,8 @@ export default function Management({ profile }) {
               </div>
             )}
             <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
-              <div className="text-2xl font-bold text-zinc-900 mb-1">{pendingEvents.length}</div>
-              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Pending</div>
+              <div className="text-2xl font-bold text-zinc-900 mb-1">{myPendingEvents.length}</div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Pending Events</div>
             </div>
             <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
               <div className="text-2xl font-bold text-zinc-900 mb-1">{capacities.length}</div>
@@ -783,7 +817,7 @@ export default function Management({ profile }) {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
                   <ShieldCheck className="text-emerald-600" size={24} />
-                  Pending Approvals
+                  Pending User Approvals
                 </h2>
               </div>
               {pendingManagers.length > 0 ? (
@@ -1199,108 +1233,102 @@ export default function Management({ profile }) {
             </section>
           )}
 
+          {/* 🔥 DYNAMIC EVENT APPROVAL PIPELINE 🔥 */}
           <section>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
                 <Clock className="text-amber-500" size={24} />
-                Pending Approvals
+                Events Requiring Attention
               </h2>
               <span className="bg-amber-50 text-amber-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border border-amber-100">
-                {pendingEvents.length} Requests
+                {myPendingEvents.length} Pending
               </span>
             </div>
 
-            {pendingEvents.length === 0 ? (
+            {myPendingEvents.length === 0 ? (
               <div className="bg-white border border-zinc-200 rounded-3xl p-12 text-center shadow-sm">
                 <div className="bg-emerald-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-100">
                   <CheckCircle2 className="text-emerald-500" size={32} />
                 </div>
-                <h3 className="text-xl font-bold text-zinc-900 mb-2">All caught up!</h3>
+                <h3 className="text-xl font-bold text-zinc-900 mb-2">Inbox Empty!</h3>
                 <p className="text-zinc-500 max-w-xs mx-auto">
-                  There are no pending event requests at the moment.
+                  There are no event requests waiting at your stage right now.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
                 <AnimatePresence mode="popLayout">
-                  {pendingEvents.map((event) => (
-                    <motion.div
-                      key={event.id}
-                      layout
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="bg-white border border-zinc-200 rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-all group"
-                    >
-                      <div className="flex flex-col md:flex-row">
-                        <div className="w-full md:w-48 h-48 md:h-auto relative overflow-hidden bg-zinc-100">
-                          <img
-                            src={event.posterUrl}
-                            alt={event.title}
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                          />
-                          <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors" />
-                        </div>
-                        <div className="flex-1 p-4 md:p-8 flex flex-col">
-                          <div className="flex items-start justify-between mb-4">
-                            <div>
-                              <h3 className="text-xl font-bold text-zinc-900 mb-2 line-clamp-1">{event.title}</h3>
-                              <div className="flex flex-wrap gap-4 text-sm text-zinc-500">
-                                <div className="flex items-center gap-1.5">
-                                  <Calendar size={14} />
-                                  <span>{safeFormatDate(event.date)}</span>
+                  {myPendingEvents.map((event) => {
+                    const stage = getEffectiveStage(event);
+                    const timeLeft = Math.max(0, STAGE_TIMEOUT - (Date.now() - (event.stageUpdatedAt || event.createdAt)));
+                    const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
+                    const minutesLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+
+                    return (
+                      <motion.div
+                        key={event.id}
+                        layout
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-white border border-zinc-200 rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-all group"
+                      >
+                        <div className="flex flex-col md:flex-row">
+                          <div className="w-full md:w-48 h-48 md:h-auto relative overflow-hidden bg-zinc-100">
+                            <img src={event.posterUrl} alt={event.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                          </div>
+                          <div className="flex-1 p-4 md:p-8 flex flex-col">
+                            <div className="flex items-start justify-between mb-4">
+                              <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="px-2 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold uppercase tracking-wider rounded-md border border-blue-100">
+                                    {stage === "hod" ? "HOD Stage" : "Principal Stage"}
+                                  </span>
+                                  {stage === "hod" && (
+                                    <span className="text-[10px] font-bold text-amber-500 flex items-center gap-1">
+                                      <Clock size={12} /> Auto-forwards in {hoursLeft}h {minutesLeft}m
+                                    </span>
+                                  )}
+                                  {event.approvalStage !== stage && (
+                                    <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-1 rounded">
+                                      Auto-escalated (Lower tier timed out)
+                                    </span>
+                                  )}
                                 </div>
-                                <div className="flex items-center gap-1.5">
-                                  <User size={14} />
-                                  <span className="uppercase">{event.hostName || "Unknown Host"}</span>
-                                </div>
+                                <h3 className="text-xl font-bold text-zinc-900 mb-2">{event.title}</h3>
+                                <p className="text-sm text-zinc-500">Host: <strong className="text-zinc-700">{event.hostName}</strong> ({event.hostRole} - {event.hostDepartment})</p>
                               </div>
                             </div>
-                            <div className="text-xs font-bold text-zinc-400 bg-zinc-50 px-2 py-1 rounded uppercase tracking-wider">
-                              {safeFormatDate(event.createdAt, "MMM d")}
+
+                            <div className="mt-auto pt-6 border-t border-zinc-100 flex flex-wrap gap-3">
+                              <Link to={`/event/${event.id}`} className="px-4 py-2 rounded-xl bg-zinc-50 text-zinc-600 text-sm font-bold hover:bg-zinc-100 transition-all flex items-center gap-2">
+                                <Eye size={16} /> Details
+                              </Link>
+                              <div className="flex-1" />
+                              <button
+                                onClick={() => {
+                                  setSelectedEventId(event.id);
+                                  setRejectModalOpen(true);
+                                }}
+                                disabled={!!processing}
+                                className="px-4 py-2 rounded-xl bg-red-50 text-red-600 text-sm font-bold hover:bg-red-100 transition-all flex items-center gap-2"
+                              >
+                                <XCircle size={16} /> Reject
+                              </button>
+                              <button
+                                onClick={() => handleApproveEvent(event)}
+                                disabled={!!processing}
+                                className="px-4 py-2 rounded-xl bg-zinc-900 text-white text-sm font-bold hover:bg-zinc-800 transition-all flex items-center gap-2 shadow-lg shadow-zinc-900/20"
+                              >
+                                {processing === event.id ? <Loader2 className="animate-spin" size={16} /> : (stage === "hod" ? <Forward size={16} /> : <CheckCircle2 size={16} />)}
+                                {stage === "hod" ? "Approve & Forward to Principal" : "Final Approval (Publish)"}
+                              </button>
                             </div>
                           </div>
-
-                          <div className="mt-auto pt-6 border-t border-zinc-100 flex flex-wrap gap-3">
-                            <Link
-                              to={`/event/${event.id}`}
-                              className="px-3 md:px-4 py-2 rounded-xl bg-zinc-50 text-zinc-600 text-sm font-bold hover:bg-zinc-100 transition-all flex items-center gap-2 min-w-[44px] justify-center"
-                            >
-                              <Eye size={16} />
-                              <span className="hidden md:inline">Details</span>
-                              <span className="md:hidden">D</span>
-                            </Link>
-                            <div className="flex-1" />
-                            <button
-                              onClick={() => handleStatusUpdate(event.id, "rejected")}
-                              disabled={!!processing}
-                              className="px-3 md:px-4 py-2 rounded-xl bg-red-50 text-red-600 text-sm font-bold hover:bg-red-100 transition-all flex items-center gap-2 min-w-[44px] justify-center"
-                            >
-                              <XCircle size={16} />
-                              <span className="hidden md:inline">Reject</span>
-                              <span className="md:hidden">R</span>
-                            </button>
-                            <button
-                              onClick={() => handleStatusUpdate(event.id, "approved")}
-                              disabled={!!processing}
-                              className="px-3 md:px-4 py-2 rounded-xl bg-zinc-900 text-white text-sm font-bold hover:bg-zinc-800 transition-all flex items-center gap-2 shadow-lg shadow-zinc-900/20 min-w-[44px] justify-center"
-                            >
-                              {processing === event.id ? (
-                                <Loader2 className="animate-spin" size={16} />
-                              ) : (
-                                <>
-                                  <CheckCircle2 size={16} />
-                                  <span className="hidden md:inline">Approve</span>
-                                  <span className="md:hidden">A</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
                         </div>
-                      </div>
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
                 </AnimatePresence>
               </div>
             )}
@@ -1643,7 +1671,7 @@ export default function Management({ profile }) {
               className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
             >
               <h3 className="text-2xl font-bold text-zinc-900 mb-4">Reject Event</h3>
-              <p className="text-zinc-500 mb-6">Please provide a reason for rejecting this event. This will be visible to the host.</p>
+              <p className="text-zinc-500 mb-6">Please provide a reason for rejecting this event. The host will be notified.</p>
 
               <textarea
                 value={rejectionReason}

@@ -8,8 +8,6 @@ import { Send, GraduationCap, MessageSquare, Sparkles, Trash2, X, Check, BarChar
 import { cn } from "../lib/utils";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
-
-// --- NEW IMPORT ADDED HERE ---
 import { useNotifications } from "../context/NotificationContext";
 
 const CLOUDINARY_CLOUD_NAME = "dbyraj0xm";
@@ -83,11 +81,31 @@ async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
   })
 }
 
+// 🔥 AGGRESSIVE ROLE FORMATTER 🔥
+const formatUserRole = (u) => {
+  if (!u) return "User";
+
+  if (u.email === "campusbridgeofficials@gmail.com" || u.type === "developer") return "Developer";
+
+  if (u.type === "hod" || (u.email && u.email.toLowerCase().startsWith("hod"))) {
+    const dept = u.department || u.email.match(/^hod([a-z]+)@/i)?.[1]?.toUpperCase() || "Dept";
+    return `HOD of ${dept}`;
+  }
+
+  // Checks boolean OR string variants just in case the DB saved it as text
+  if (u.isTutor === true || u.isTutor === "true" || !!u.tutorOf) {
+    return `Tutor ${u.tutorOf ? u.tutorOf + ' Batch' : ''}`.trim();
+  }
+
+  if (u.role) return u.role.charAt(0).toUpperCase() + u.role.slice(1);
+  return "User";
+};
+
 export default function CampusConnect({ user, profile }) {
   const [messages, setMessages] = useState([]);
   const [polls, setPolls] = useState([]);
   const [usersList, setUsersList] = useState([]);
-  const [activeTab, setActiveTab] = useState("chat"); // "chat", "polls", or "directory"
+  const [activeTab, setActiveTab] = useState("chat");
   const [searchQuery, setSearchQuery] = useState("");
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -110,11 +128,9 @@ export default function CampusConnect({ user, profile }) {
   const [isDeletingPoll, setIsDeletingPoll] = useState(false);
   const messagesEndRef = useRef(null);
 
-  // --- NOTIFICATION HOOK INITIALIZED HERE ---
   const { sendNotification } = useNotifications();
 
   useEffect(() => {
-    // Chat messages listener
     const qChat = query(
       collection(db, "alumniChat"),
       orderBy("createdAt", "asc")
@@ -130,7 +146,6 @@ export default function CampusConnect({ user, profile }) {
       scrollToBottom();
     });
 
-    // Polls listener
     const qPolls = query(
       collection(db, "polls"),
       orderBy("createdAt", "desc")
@@ -146,7 +161,6 @@ export default function CampusConnect({ user, profile }) {
       console.error("Polls listener error:", error);
     });
 
-    // Users listener
     const qUsers = query(
       collection(db, "users"),
       orderBy("displayName", "asc")
@@ -183,7 +197,7 @@ export default function CampusConnect({ user, profile }) {
         question: pollQuestion.trim(),
         options: validOptions,
         targetAudience: pollTarget,
-        votes: {}, // userId: optionIndex
+        votes: {},
         createdBy: user.uid,
         creatorName: profile.displayName,
         createdAt: serverTimestamp()
@@ -226,11 +240,9 @@ export default function CampusConnect({ user, profile }) {
 
     setIsDeletingPoll(true);
     try {
-      // Re-authenticate user
       const credential = EmailAuthProvider.credential(user.email, deletePassword);
       await reauthenticateWithCredential(auth.currentUser, credential);
 
-      // If successful, delete the poll
       await deleteDoc(doc(db, "polls", pollToDelete));
       toast.success("Poll deleted successfully");
       setPollToDelete(null);
@@ -331,21 +343,18 @@ export default function CampusConnect({ user, profile }) {
         senderId: user.uid,
         senderName: profile.displayName,
         senderEmail: profile.email,
-        senderRole: isDeveloper ? "developer" : profile.role,
+        senderRole: formatUserRole(profile), // Dynamically generate role before saving
         senderDept: isDeveloper ? "Admin" : (profile.department || "Management"),
         createdAt: serverTimestamp()
       });
 
-      // --- NEW NOTIFICATION TRIGGER ---
-      // This alerts "all" users that a new message was posted
       await sendNotification({
         title: "Campus Connect",
         message: `${profile.displayName} posted a new message in the chat.`,
-        link: "/campus-connect", // Assuming this is the route for this page
+        link: "/campus-connect",
         recipients: ["all"],
         type: "CHAT"
       });
-      // --- END NEW NOTIFICATION TRIGGER ---
 
       setNewMessage("");
       setImageFile(null);
@@ -487,6 +496,14 @@ export default function CampusConnect({ user, profile }) {
                 const isMe = msg.senderId === user.uid;
                 const showHeader = index === 0 || messages[index - 1].senderId !== msg.senderId;
 
+                // Live check the current roles from the DB
+                const senderUserObj = usersList.find(u => u.id === msg.senderId);
+                const displayRole = senderUserObj ? formatUserRole(senderUserObj) : (msg.senderRole || "User");
+
+                // Pure CSS check to apply correct badge colors even for custom strings
+                const isFacultyCSS = displayRole.includes("Tutor") || displayRole.includes("Faculty");
+                const isManagerCSS = displayRole.includes("HOD") || displayRole.includes("Management");
+
                 return (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
@@ -513,13 +530,13 @@ export default function CampusConnect({ user, profile }) {
                         )}
                         <span className={cn(
                           "text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider",
-                          msg.senderEmail === "campusbridgeofficials@gmail.com" || msg.senderRole === "developer" ? "bg-indigo-100 text-indigo-700" :
-                            msg.senderRole === "alumni" ? "bg-amber-100 text-amber-700" :
-                              msg.senderRole === "faculty" ? "bg-purple-100 text-purple-700" :
-                                msg.senderRole === "management" ? "bg-red-100 text-red-700" :
+                          msg.senderEmail === "campusbridgeofficials@gmail.com" || displayRole === "Developer" ? "bg-indigo-100 text-indigo-700" :
+                            displayRole === "Alumni" ? "bg-amber-100 text-amber-700" :
+                              isFacultyCSS ? "bg-purple-100 text-purple-700" :
+                                isManagerCSS ? "bg-red-100 text-red-700" :
                                   "bg-emerald-100 text-emerald-700"
                         )}>
-                          {msg.senderEmail === "campusbridgeofficials@gmail.com" ? "developer" : msg.senderRole}
+                          {displayRole}
                         </span>
                       </div>
                     )}
@@ -639,7 +656,7 @@ export default function CampusConnect({ user, profile }) {
           </div>
         </div>
 
-        {/* Sidebar for Polls & Directory - Desktop Only (and Mobile when active) */}
+        {/* Sidebar for Polls & Directory */}
         <div className={cn(
           "lg:flex w-full lg:w-80 border-l border-zinc-200 flex-col bg-zinc-50/50",
           activeTab === "chat" ? "hidden" : "flex"
@@ -777,46 +794,52 @@ export default function CampusConnect({ user, profile }) {
                   {usersList
                     .filter(u =>
                       u.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      u.role?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      formatUserRole(u).toLowerCase().includes(searchQuery.toLowerCase()) ||
                       u.department?.toLowerCase().includes(searchQuery.toLowerCase())
                     )
-                    .map((u) => (
-                      <motion.div
-                        key={u.id}
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white p-3 rounded-2xl border border-zinc-200 flex items-center gap-3 group hover:border-emerald-200 transition-all"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-zinc-100 flex items-center justify-center text-zinc-400 font-bold overflow-hidden shrink-0">
-                          {u.photoURL ? (
-                            <img src={u.photoURL} alt={u.displayName} className="w-full h-full object-cover" />
-                          ) : (
-                            u.displayName?.charAt(0)
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <h5 className="text-xs font-bold text-zinc-900 truncate">{u.displayName}</h5>
-                            <span className={cn(
-                              "text-[8px] px-1 py-0.5 rounded font-bold uppercase tracking-wider shrink-0",
-                              u.email === "campusbridgeofficials@gmail.com" || u.role === "developer" ? "bg-indigo-100 text-indigo-700" :
-                                u.role === "alumni" ? "bg-amber-100 text-amber-700" :
-                                  u.role === "faculty" ? "bg-purple-100 text-purple-700" :
-                                    u.role === "management" ? "bg-red-100 text-red-700" :
-                                      "bg-emerald-100 text-emerald-700"
-                            )}>
-                              {u.email === "campusbridgeofficials@gmail.com" ? "developer" : u.role}
-                            </span>
+                    .map((u) => {
+                      const displayRole = formatUserRole(u);
+                      const isFacultyCSS = displayRole.includes("Tutor") || displayRole.includes("Faculty");
+                      const isManagerCSS = displayRole.includes("HOD") || displayRole.includes("Management");
+
+                      return (
+                        <motion.div
+                          key={u.id}
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-white p-3 rounded-2xl border border-zinc-200 flex items-center gap-3 group hover:border-emerald-200 transition-all"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-zinc-100 flex items-center justify-center text-zinc-400 font-bold overflow-hidden shrink-0">
+                            {u.photoURL ? (
+                              <img src={u.photoURL} alt={u.displayName} className="w-full h-full object-cover" />
+                            ) : (
+                              u.displayName?.charAt(0)
+                            )}
                           </div>
-                          <p className="text-[10px] text-zinc-500 truncate">{u.email === "campusbridgeofficials@gmail.com" ? "System Admin" : (u.department || "Campus Member")}</p>
-                          {(u.studentId || u.facultyId || u.email === "campusbridgeofficials@gmail.com") && (
-                            <p className="text-[9px] text-zinc-400 font-mono mt-0.5">
-                              ID: {u.studentId || u.facultyId || (u.email === "campusbridgeofficials@gmail.com" ? "DEV-001" : "")}
-                            </p>
-                          )}
-                        </div>
-                      </motion.div>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <h5 className="text-xs font-bold text-zinc-900 truncate">{u.displayName}</h5>
+                              <span className={cn(
+                                "text-[8px] px-1 py-0.5 rounded font-bold uppercase tracking-wider shrink-0",
+                                u.email === "campusbridgeofficials@gmail.com" || displayRole === "Developer" ? "bg-indigo-100 text-indigo-700" :
+                                  displayRole === "Alumni" ? "bg-amber-100 text-amber-700" :
+                                    isFacultyCSS ? "bg-purple-100 text-purple-700" :
+                                      isManagerCSS ? "bg-red-100 text-red-700" :
+                                        "bg-emerald-100 text-emerald-700"
+                              )}>
+                                {displayRole}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-zinc-500 truncate">{u.email === "campusbridgeofficials@gmail.com" ? "System Admin" : (u.department || "Campus Member")}</p>
+                            {(u.studentId || u.facultyId || u.email === "campusbridgeofficials@gmail.com") && (
+                              <p className="text-[9px] text-zinc-400 font-mono mt-0.5">
+                                ID: {u.studentId || u.facultyId || (u.email === "campusbridgeofficials@gmail.com" ? "DEV-001" : "")}
+                              </p>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
                   {usersList.length === 0 && (
                     <div className="text-center py-8">
                       <p className="text-xs text-zinc-400">No members found</p>

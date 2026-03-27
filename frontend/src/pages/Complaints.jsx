@@ -27,18 +27,15 @@ import {
   CheckCircle2,
   AlertCircle,
   User,
-  MoreVertical,
-  ChevronDown,
-  ChevronUp,
-  ShieldCheck,
-  Trash2,
   BadgeCheck,
   Heart,
   Camera,
   X,
   Crop,
   Sparkles,
-  Lock
+  Lock,
+  Trash2,
+  ShieldCheck
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useNotifications } from "../context/NotificationContext";
@@ -127,9 +124,6 @@ const getRadianAngle = (degreeValue) => {
   return (degreeValue * Math.PI) / 180
 }
 
-/**
- * Returns the new bounding area of a rotated rectangle.
- */
 function rotateSize(width, height, rotation) {
   const rotRad = getRadianAngle(rotation)
 
@@ -151,28 +145,21 @@ async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
   }
 
   const rotRad = getRadianAngle(rotation)
-
-  // calculate bounding box of the rotated image
   const { width: bBoxWidth, height: bBoxHeight } = rotateSize(
     image.width,
     image.height,
     rotation
   )
 
-  // set canvas size to match the bounding box
   canvas.width = bBoxWidth
   canvas.height = bBoxHeight
 
-  // translate canvas context to a central point to allow rotating and flipping around the center
   ctx.translate(bBoxWidth / 2, bBoxHeight / 2)
   ctx.rotate(rotRad)
   ctx.translate(-image.width / 2, -image.height / 2)
 
-  // draw rotated image
   ctx.drawImage(image, 0, 0)
 
-  // croppedAreaPixels values are bounding box relative
-  // extract the cropped image using these values
   const data = ctx.getImageData(
     pixelCrop.x,
     pixelCrop.y,
@@ -180,11 +167,9 @@ async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
     pixelCrop.height
   )
 
-  // set canvas width to final desired crop size - this will clear existing context
   canvas.width = pixelCrop.width
   canvas.height = pixelCrop.height
 
-  // paste generated rotate image with correct offsets for x,y crop values.
   ctx.putImageData(data, 0, 0)
 
   return new Promise((resolve, reject) => {
@@ -219,6 +204,32 @@ export default function Complaints({ profile }) {
 
   const isDeveloper = profile?.email === "campusbridgeofficials@gmail.com";
   const canModerate = isDeveloper || profile?.role === "management";
+
+  // 🔥 CUSTOM ROLE FORMATTING FOR HOD AND TUTOR 🔥
+  const getDisplayRole = () => {
+    if (isDeveloper) return "Developer";
+    if (profile?.type === "hod" || (profile?.email && profile.email.toLowerCase().startsWith("hod"))) {
+      const dept = profile?.department || profile?.email.match(/^hod([a-z]+)@/i)?.[1]?.toUpperCase() || "Dept";
+      return `HOD of ${dept}`;
+    }
+    if (profile?.isTutor) return `Tutor ${profile.tutorOf} Batch`;
+    if (profile?.role === "management") return "Management";
+    if (profile?.role === "faculty") return "Faculty";
+    if (profile?.role === "student") return "Student";
+    return profile?.role || "User";
+  };
+
+  const getAuthorName = () => {
+    if (isDeveloper) return "Developer";
+    if (profile?.type === "hod" || (profile?.email && profile.email.toLowerCase().startsWith("hod"))) {
+      const dept = profile?.department || profile?.email.match(/^hod([a-z]+)@/i)?.[1]?.toUpperCase() || "Dept";
+      return `HOD of ${dept}`;
+    }
+    if (profile?.isTutor) return `${profile.displayName} (Tutor ${profile.tutorOf} Batch)`;
+    if (profile?.role === "faculty") return profile.displayName;
+    if (profile?.role === "management") return "Management";
+    return profile?.codeName || "Anonymous";
+  };
 
   const handleImageChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -299,7 +310,6 @@ export default function Complaints({ profile }) {
       (error) => {
         console.error("Complaints listener error:", error);
         if (error.code === "permission-denied") {
-          // Only show toast if we actually have a profile, otherwise it's just a race condition
           if (profile) {
             toast.error("Access Denied: Please ensure Firestore Security Rules allow reading the 'complaints' collection.");
           }
@@ -343,37 +353,35 @@ export default function Complaints({ profile }) {
         }
       }
 
+      // 🔥 Use the custom format author name 🔥
       const docRef = await addDoc(collection(db, "complaints"), {
         text: newComplaint,
         imageUrl: imageUrl,
-        authorCodeName: isDeveloper ? "Developer" : (profile.role === "faculty" ? profile.displayName : (profile.codeName || (profile.role === "management" ? "Management" : "Anonymous"))),
-        authorRealName: profile.displayName, // Stored for developer visibility
-        authorEmail: profile.email, // Added for verified badge
+        authorCodeName: getAuthorName(),
+        authorRealName: profile.displayName,
+        authorEmail: profile.email,
         authorUid: profile.uid,
         privateToFacultyId: selectedFacultyId || null,
         likes: [],
         comments: [],
-        status: "pending", // pending, in-progress, resolved
+        status: "pending",
         createdAt: serverTimestamp(),
       });
 
-      // --- FIXED NOTIFICATION LOGIC ---
       console.log("Sending notification to management...");
       let recipients = [];
 
-      // If private, only ping the faculty member. If public, ping management.
       if (selectedFacultyId) {
         recipients = [selectedFacultyId];
       } else {
         recipients = ["role_management"];
       }
 
-      // Also notify the author so it shows up in their own NotificationPanel UI
       if (!recipients.includes(profile.uid)) {
         recipients.push(profile.uid);
       }
 
-      const authorName = profile.role === "faculty" ? profile.displayName : (profile.codeName || "Anonymous");
+      const authorName = getAuthorName();
       await sendNotification({
         title: selectedFacultyId ? "New Private Message" : "New Anonymous Complaint",
         message: `A new complaint has been posted by ${authorName}`,
@@ -383,7 +391,6 @@ export default function Complaints({ profile }) {
         relatedId: docRef.id
       });
       console.log("Notification sent successfully.");
-      // --- END OF FIX ---
 
       setNewComplaint("");
       setImageFile(null);
@@ -419,11 +426,11 @@ export default function Complaints({ profile }) {
 
     try {
       const newComment = {
-        id: Date.now().toString(), // Added ID for easier deletion
+        id: Date.now().toString(),
         text: commentText,
-        authorCodeName: isDeveloper ? "Developer" : (profile.role === "faculty" ? profile.displayName : (profile.codeName || (profile.role === "management" ? "Management" : "Anonymous"))),
-        authorRealName: profile.displayName, // Stored for developer visibility
-        authorEmail: profile.email, // Added for verified badge
+        authorCodeName: getAuthorName(), // 🔥 Use the custom format author name 🔥
+        authorRealName: profile.displayName,
+        authorEmail: profile.email,
         authorUid: profile.uid,
         createdAt: Date.now(),
         likes: []
@@ -435,7 +442,6 @@ export default function Complaints({ profile }) {
         comments: arrayUnion(newComment)
       });
 
-      // Notify complaint author if someone else comments
       if (complaint && complaint.authorUid !== profile.uid) {
         await sendNotification({
           title: "New Comment",
@@ -487,7 +493,6 @@ export default function Complaints({ profile }) {
     const complaint = complaints.find(c => c.id === complaintId);
     if (!complaint) return;
 
-    // Allow developer or the author of the complaint to delete it
     if (!isDeveloper && complaint.authorUid !== profile?.uid) return;
 
     try {
@@ -495,7 +500,6 @@ export default function Complaints({ profile }) {
         deleted: true
       });
 
-      // Delete associated notifications
       await deleteNotificationsByRelatedId(complaintId);
 
       toast.success(isDeveloper ? "Complaint deleted by Moderator" : "Complaint deleted");
@@ -523,7 +527,6 @@ export default function Complaints({ profile }) {
     }
 
     try {
-      // Filter out the comment to delete
       const updatedComments = complaint.comments.filter(c => {
         const isTarget = (c.id && commentToDelete.id && c.id === commentToDelete.id) ||
           (!c.id && !commentToDelete.id && c.text === commentToDelete.text && c.authorUid === commentToDelete.authorUid && c.createdAt === commentToDelete.createdAt);
@@ -561,7 +564,6 @@ export default function Complaints({ profile }) {
     try {
       await updateDoc(complaintRef, { status: newStatus });
 
-      // Notify the author of the complaint
       if (complaint && complaint.authorUid) {
         await sendNotification({
           title: "Complaint Status Updated",
@@ -611,7 +613,6 @@ export default function Complaints({ profile }) {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] text-zinc-400">{formatRelativeTime(comment.createdAt)}</span>
-
             </div>
           </div>
           <p className="text-sm text-zinc-600 whitespace-pre-wrap break-all">{renderCommentText(comment.text)}</p>
@@ -751,16 +752,16 @@ export default function Complaints({ profile }) {
                 <User size={20} />
               </div>
               <span className="font-bold text-zinc-900">
-                {profile?.role === "faculty" ? profile.displayName : profile.codeName}
+                {profile?.role === "student" ? profile.codeName : profile.displayName}
               </span>
               <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest bg-zinc-50 px-2 py-1 rounded-lg border border-zinc-100">
-                {profile?.role === "faculty" ? "Faculty" : "Student"}
+                {getDisplayRole()}
               </span>
             </div>
             <textarea
               value={newComplaint}
               onChange={(e) => setNewComplaint(e.target.value)}
-              placeholder={profile?.role === "faculty" ? "What's on your mind? (Posted under your real name)" : "What's on your mind? (Your identity remains hidden, only your code name is shown)"}
+              placeholder={profile?.role === "faculty" || profile?.role === "management" ? "What's on your mind? (Posted under your real name/role)" : "What's on your mind? (Your identity remains hidden, only your code name is shown)"}
               className="w-full min-h-[120px] p-4 bg-zinc-50 border border-zinc-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-300 transition-all resize-none font-medium"
             />
             {profile?.role === "student" && (
@@ -1012,7 +1013,7 @@ export default function Complaints({ profile }) {
                     </button>
                   </div>
 
-                  {(profile?.role === "management" || isDeveloper) && (
+                  {(canModerate) && (
                     <div className="flex items-center gap-2 pt-4 border-t border-zinc-50">
                       <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest mr-2">Update Status:</span>
                       <button

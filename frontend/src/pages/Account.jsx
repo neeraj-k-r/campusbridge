@@ -210,6 +210,13 @@ export default function Account({ profile: initialProfile }) {
 
   if (!profile) return null;
 
+  // 🔥 Dynamically figure out what the user's role badge should say
+  const displayRole = profile.email === "campusbridgeofficials@gmail.com"
+    ? "developer"
+    : (profile.role === "faculty" && profile.isTutor)
+      ? `Tutor (${profile.tutorOf} Batch)`
+      : profile.role;
+
   return (
     <div className="max-w-3xl mx-auto space-y-8">
       {showCropper && (
@@ -261,7 +268,8 @@ export default function Account({ profile: initialProfile }) {
             </div>
             <div className="px-3 py-1 bg-zinc-100 rounded-full text-xs font-bold uppercase tracking-wider text-zinc-600 border border-zinc-200 flex items-center gap-1.5 self-start shrink-0">
               <Shield size={12} />
-              {profile.email === "campusbridgeofficials@gmail.com" ? "developer" : profile.role}
+              {/* Used the dynamically calculated role here */}
+              {displayRole}
             </div>
           </div>
 
@@ -302,7 +310,8 @@ export default function Account({ profile: initialProfile }) {
               <div className="flex items-center gap-2 text-zinc-400 text-xs font-bold uppercase tracking-wider mb-1">
                 <User size={14} /> Role
               </div>
-              <div className="text-zinc-900 font-bold text-lg capitalize">{profile.email === "campusbridgeofficials@gmail.com" ? "developer" : profile.role}</div>
+              {/* And used it here as well! */}
+              <div className="text-zinc-900 font-bold text-lg capitalize">{displayRole}</div>
             </div>
           </div>
         </div>

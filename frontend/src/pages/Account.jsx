@@ -16,12 +16,12 @@ export default function Account({ profile: initialProfile }) {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [profile, setProfile] = useState(initialProfile);
-  
+
   // Password change state
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  
+
   // Show password state
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -58,7 +58,7 @@ export default function Account({ profile: initialProfile }) {
   const handleChangePassword = async (e) => {
     e.preventDefault();
     if (!user?.email) return;
-    
+
     if (newPassword !== confirmPassword) {
       toast.error("New passwords do not match");
       return;
@@ -74,12 +74,12 @@ export default function Account({ profile: initialProfile }) {
       // Re-authenticate user
       const credential = EmailAuthProvider.credential(user.email, currentPassword);
       await reauthenticateWithCredential(user, credential);
-      
+
       // Update password
       await updatePassword(user, newPassword);
-      
+
       toast.success("Password updated successfully!");
-      
+
       // Clear fields
       setCurrentPassword("");
       setNewPassword("");
@@ -100,7 +100,7 @@ export default function Account({ profile: initialProfile }) {
 
   const handleDeleteAccount = async (e) => {
     if (e) e.preventDefault();
-    
+
     if (!deletePassword) {
       toast.error("Please enter your password to confirm deletion");
       return;
@@ -162,7 +162,7 @@ export default function Account({ profile: initialProfile }) {
         toast.error("File size must be less than 5MB");
         return;
       }
-      
+
       const reader = new FileReader();
       reader.onloadend = () => {
         setTempImage(reader.result);
@@ -213,9 +213,9 @@ export default function Account({ profile: initialProfile }) {
   return (
     <div className="max-w-3xl mx-auto space-y-8">
       {showCropper && (
-        <ImageCropper 
-          image={tempImage} 
-          onCropComplete={handleCropComplete} 
+        <ImageCropper
+          image={tempImage}
+          onCropComplete={handleCropComplete}
           onCancel={() => {
             setShowCropper(false);
             setTempImage(null);
@@ -252,7 +252,7 @@ export default function Account({ profile: initialProfile }) {
             </div>
           </div>
         </div>
-        
+
         <div className="pt-16 pb-8 px-8">
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-8">
             <div className="min-w-0">
@@ -318,9 +318,9 @@ export default function Account({ profile: initialProfile }) {
             <p className="text-zinc-500 mb-6 leading-relaxed text-sm sm:text-base">
               Have feedback, found a bug, or need help? Get in touch with the development team.
             </p>
-            
+
             <div className="flex flex-col xl:flex-row gap-4">
-              <a 
+              <a
                 href="mailto:campusbridgeofficials@gmail.com"
                 className="flex items-center gap-3 px-4 sm:px-6 py-4 bg-zinc-50 border border-zinc-200 rounded-xl hover:bg-zinc-100 hover:border-zinc-300 transition-all group overflow-hidden"
               >
@@ -332,15 +332,15 @@ export default function Account({ profile: initialProfile }) {
                   <div className="text-sm font-bold text-zinc-900 truncate">campusbridgeofficials@gmail.com</div>
                 </div>
               </a>
-              
-              <a 
+
+              <a
                 href="https://instagram.com/campusbridge_officials"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 px-4 sm:px-6 py-4 bg-zinc-50 border border-zinc-200 rounded-xl hover:bg-zinc-100 hover:border-zinc-300 transition-all group overflow-hidden"
               >
                 <div className="w-10 h-10 shrink-0 bg-white rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600"><rect width="20" height="20" x="2" y="2" rx="5" ry="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" x2="17.51" y1="6.5" y2="6.5" /></svg>
                 </div>
                 <div className="min-w-0">
                   <div className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-0.5">Follow Us</div>
@@ -362,7 +362,7 @@ export default function Account({ profile: initialProfile }) {
             <p className="text-zinc-500 mb-6 leading-relaxed">
               Update your password to keep your account secure.
             </p>
-            
+
             <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
               <div>
                 <label className="block text-sm font-bold text-zinc-700 mb-1">Current Password</label>
@@ -423,7 +423,7 @@ export default function Account({ profile: initialProfile }) {
                   </button>
                 </div>
               </div>
-              
+
               <button
                 type="submit"
                 disabled={resetLoading}
@@ -435,7 +435,7 @@ export default function Account({ profile: initialProfile }) {
           </div>
         </div>
       </div>
-      
+
       <div className="bg-red-50 border border-red-100 rounded-[2rem] p-8">
         <div className="flex items-start gap-4">
           <div className="bg-red-100 p-3 rounded-xl shrink-0">
@@ -446,7 +446,7 @@ export default function Account({ profile: initialProfile }) {
             <p className="text-red-700/80 mb-6 leading-relaxed">
               Deleting your account will permanently remove your profile, event registrations, and release your Student ID for others to use. This action cannot be undone.
             </p>
-            
+
             {!showDeleteConfirm ? (
               <button
                 onClick={() => setShowDeleteConfirm(true)}

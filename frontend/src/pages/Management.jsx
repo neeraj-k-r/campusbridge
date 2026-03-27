@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, query, where, updateDoc, doc, onSnapshot, setDoc, deleteDoc, getDoc, addDoc, orderBy, serverTimestamp, increment } from "firebase/firestore";
+import { collection, query, where, updateDoc, doc, onSnapshot, setDoc, deleteDoc, getDoc, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { db, auth } from "../firebase";
 import ImageCropper from "../components/ImageCropper";
@@ -12,8 +12,8 @@ import { cn } from "../lib/utils";
 import { useNotifications } from "../context/NotificationContext";
 
 // Cloudinary Config
-const CLOUDINARY_CLOUD_NAME = "dbyraj0xm";
-const CLOUDINARY_UPLOAD_PRESET = "campus_posters";
+const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "dbyraj0xm";
+const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "campus_posters";
 
 export default function Management({ profile }) {
   const [pendingEvents, setPendingEvents] = useState([]);
@@ -28,7 +28,7 @@ export default function Management({ profile }) {
   const [rejectionReason, setRejectionReason] = useState("");
   const [managerToReject, setManagerToReject] = useState(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
-  const [passwordModal, setPasswordModal] = useState({ isOpen: false, action: null, capacity: null, userToDelete: null, email: profile?.email || "", password: "", error: "", loading: false });
+  const [passwordModal, setPasswordModal] = useState({ isOpen: false, action: null, capacity: null, userToDelete: null, password: "", developerPassword: "", error: "", loading: false });
   const { sendNotification } = useNotifications();
 
   const [newDept, setNewDept] = useState("CSE");
@@ -55,19 +55,33 @@ export default function Management({ profile }) {
   const [adDisplayStrategy, setAdDisplayStrategy] = useState("round-robin");
   const [strategyLoading, setStrategyLoading] = useState(false);
 
-  const isDeveloper = profile?.email?.toLowerCase() === "campusbridgeofficials@gmail.com";
+  // --- BULLETPROOF ROLE CHECKS ---
+  const isDeveloper = profile?.email?.toLowerCase() === "campusbridgeofficials@gmail.com" || profile?.type === "developer";
+
+  const hodDepartment = profile?.department?.toUpperCase() || profile?.email?.match(/^hod([a-z]+)@/i)?.[1]?.toUpperCase();
+
+  const isHOD = profile?.type === "hod" ||
+    (profile?.role === "management" && profile?.email?.toLowerCase().startsWith("hod")) ||
+    (profile?.role === "management" && !!hodDepartment && !isDeveloper);
+
+  const isManagementStaff = profile?.type === "manager" || profile?.type === "principal" || (profile?.role === "management" && !isHOD && !isDeveloper);
+
+  useEffect(() => {
+    if (isHOD && hodDepartment && !editingCapacity) {
+      setNewDept(hodDepartment);
+    }
+  }, [isHOD, hodDepartment, editingCapacity]);
 
   useEffect(() => {
     if (!profile) return;
 
-    // Reset form when editing is canceled
     if (!editingCapacity) {
-      setNewDept("CSE");
+      setNewDept(isHOD && hodDepartment ? hodDepartment : "CSE");
       setCustomDept("");
       setNewYear(new Date().getFullYear().toString());
       setNewTotal("");
     }
-  }, [editingCapacity, profile]);
+  }, [editingCapacity, profile, isHOD, hodDepartment]);
 
   useEffect(() => {
     if (!profile) return;
@@ -79,24 +93,16 @@ export default function Management({ profile }) {
 
     const unsubscribeEvents = onSnapshot(qEvents,
       (querySnapshot) => {
-        const eventsData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+        const eventsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setPendingEvents(eventsData);
       },
-      (error) => {
-        console.error("Events listener error:", error);
-      }
+      (error) => console.error("Events listener error:", error)
     );
 
     const qCap = collection(db, "departmentCapacity");
     const unsubscribeCap = onSnapshot(qCap,
       (querySnapshot) => {
-        const capData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+        const capData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setCapacities(capData);
         setLoading(false);
       },
@@ -106,52 +112,110 @@ export default function Management({ profile }) {
       }
     );
 
-    // Include management in directory
-    const qUsers = query(collection(db, "users"), where("role", "in", ["student", "faculty", "alumni", "management"]));
-    const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
-      setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-
-    let unsubscribeManagers = () => { };
-    let unsubscribeAds = () => { };
-    let unsubscribeStrategy = () => { };
-
-    // Ensure Developer and Management can see pending Faculty/Managers
+    let unsubscribeUsers = () => { };
     if (profile?.role === "management" || isDeveloper) {
-      const qManagers = query(
-        collection(db, "users"),
-        where("role", "in", ["management", "faculty"]),
-        where("isApproved", "==", false)
-      );
-      unsubscribeManagers = onSnapshot(qManagers, (snapshot) => {
-        setPendingManagers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const qUsers = query(collection(db, "users"), where("role", "in", ["student", "faculty", "alumni", "management"]));
+      unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
+        setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+    } else if (isHOD) {
+      const qUsers = query(collection(db, "users"), where("role", "==", "faculty"));
+      unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
+        const filtered = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(u => u.department?.toUpperCase() === hodDepartment);
+        setAllUsers(filtered);
       });
     }
 
-    // ONLY Developer gets Advertisement data to save reads
-    if (isDeveloper) {
-      const qAds = query(collection(db, "advertisements"), orderBy("createdAt", "desc"));
-      unsubscribeAds = onSnapshot(qAds, (snapshot) => {
-        setAds(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
+    let unsubscribePendingUsers = () => { };
+    let unsubscribeAds = () => { };
+    let unsubscribeStrategy = () => { };
 
-      const unsubscribeStrategyDoc = onSnapshot(doc(db, "settings", "ads"), (docSnap) => {
-        if (docSnap.exists()) {
-          setAdDisplayStrategy(docSnap.data().strategy || "round-robin");
-        }
-      });
-      unsubscribeStrategy = unsubscribeStrategyDoc;
+    if (profile?.role === "management" || profile?.isTutor || isDeveloper) {
+      let qPending;
+
+      if (profile?.role === "management" || isDeveloper) {
+        qPending = query(
+          collection(db, "users"),
+          where("isApproved", "==", false)
+        );
+      } else if (profile?.isTutor) {
+        qPending = query(
+          collection(db, "users"),
+          where("isApproved", "==", false),
+          where("role", "==", "student"),
+          where("department", "==", profile.department),
+          where("yearOfJoin", "==", profile.tutorOf)
+        );
+      }
+
+      if (qPending) {
+        unsubscribePendingUsers = onSnapshot(qPending, (snapshot) => {
+          const allPending = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          let filteredPending = [];
+
+          if (isDeveloper) {
+            filteredPending = allPending;
+          } else if (isManagementStaff) {
+            filteredPending = allPending.filter(u => u.role !== "student" && u.role !== "faculty");
+          } else if (isHOD) {
+            filteredPending = allPending.filter(u => {
+              return u.role === "faculty" &&
+                u.department &&
+                hodDepartment &&
+                u.department.toUpperCase() === hodDepartment;
+            });
+
+            if (profile?.isTutor) {
+              const tutorStudents = allPending.filter(u =>
+                u.role === "student" &&
+                u.department?.toUpperCase() === hodDepartment &&
+                u.yearOfJoin === profile.tutorOf
+              );
+              filteredPending = [...filteredPending, ...tutorStudents];
+            }
+          } else if (profile?.isTutor) {
+            filteredPending = allPending.filter(u =>
+              u.role === "student" &&
+              u.department?.toUpperCase() === profile.department?.toUpperCase() &&
+              u.yearOfJoin === profile.tutorOf
+            );
+          }
+          setPendingManagers(filteredPending);
+        });
+      }
+
+      if (isDeveloper) {
+        const qAds = query(collection(db, "advertisements"), orderBy("createdAt", "desc"));
+        unsubscribeAds = onSnapshot(qAds, (snapshot) => {
+          setAds(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+
+        const unsubscribeStrategyDoc = onSnapshot(doc(db, "settings", "ads"), (docSnap) => {
+          if (docSnap.exists()) {
+            setAdDisplayStrategy(docSnap.data().strategy || "round-robin");
+          }
+        });
+        unsubscribeStrategy = unsubscribeStrategyDoc;
+      }
+
+      return () => {
+        unsubscribeEvents();
+        unsubscribeCap();
+        unsubscribeUsers();
+        unsubscribePendingUsers();
+        unsubscribeAds();
+        unsubscribeStrategy();
+      };
     }
 
     return () => {
       unsubscribeEvents();
       unsubscribeCap();
       unsubscribeUsers();
-      unsubscribeManagers();
-      unsubscribeAds();
-      unsubscribeStrategy();
+      unsubscribePendingUsers();
     };
-  }, [profile, isDeveloper]);
+  }, [profile, isDeveloper, isHOD, isManagementStaff, hodDepartment]);
 
   const handleAdFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -160,7 +224,6 @@ export default function Management({ profile }) {
         toast.error("File size must be less than 5MB");
         return;
       }
-
       const reader = new FileReader();
       reader.onloadend = () => {
         setTempImage(reader.result);
@@ -184,7 +247,6 @@ export default function Management({ profile }) {
       toast.error("Only developers can create advertisements.");
       return;
     }
-
     if (!adTitle.trim() || !adMessage.trim()) {
       toast.error("Please fill in all fields");
       return;
@@ -224,19 +286,6 @@ export default function Management({ profile }) {
         priority: parseInt(adPriority) || 1,
         createdAt: serverTimestamp(),
         createdBy: profile.email
-      });
-
-      let recipients = ["all"];
-      if (adTargetAudience === "student") recipients = ["role_student"];
-      if (adTargetAudience === "faculty") recipients = ["role_faculty"];
-      if (adTargetAudience === "management") recipients = ["role_management"];
-
-      await sendNotification({
-        title: `📢 ${adTitle}`,
-        message: adMessage,
-        link: adUrl || "/",
-        recipients: recipients,
-        type: "ADVERTISEMENT"
       });
 
       toast.success("Advertisement created successfully!");
@@ -287,14 +336,12 @@ export default function Management({ profile }) {
     try {
       for (const cap of capacities) {
         let actualCount = 0;
-        const isFacultyCap = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
-
-        if (isFacultyCap) {
-          actualCount = allUsers.filter(u => u.role === "faculty" && u.department === cap.department).length;
+        if (cap.type === "faculty") {
+          actualCount = allUsers.filter(u => u.role === "faculty" && u.department?.toUpperCase() === cap.department?.toUpperCase()).length;
         } else {
           actualCount = allUsers.filter(u =>
             u.role === "student" &&
-            u.department === cap.department &&
+            u.department?.toUpperCase() === cap.department?.toUpperCase() &&
             u.yearOfJoin?.toString() === cap.yearOfJoin?.toString()
           ).length;
         }
@@ -325,15 +372,23 @@ export default function Management({ profile }) {
 
   const handleAddCapacity = async (e) => {
     e.preventDefault();
-    const dept = newDept === "CUSTOM" ? customDept.toUpperCase() : newDept;
+
+    const dept = (isHOD && !isDeveloper && !isManagementStaff) ? hodDepartment : (newDept === "CUSTOM" ? customDept.toUpperCase() : newDept);
+
     if (!dept) return;
+
+    if (isHOD && !isDeveloper && !isManagementStaff && dept !== hodDepartment) {
+      toast.error(`You can only manage capacities for the ${hodDepartment} department.`);
+      return;
+    }
+
     const id = capacityType === "student" ? `${dept}_${newYear}` : `${dept}_FACULTY`;
+
     try {
       const docRef = doc(db, "departmentCapacity", id);
       const deletedDocRef = doc(db, "deletedCapacities", id);
 
       let registeredCount = 0;
-
       const deletedDocSnap = await getDoc(deletedDocRef);
       if (deletedDocSnap.exists()) {
         registeredCount = deletedDocSnap.data().registeredCount || 0;
@@ -366,7 +421,29 @@ export default function Management({ profile }) {
     setPasswordModal(prev => ({ ...prev, loading: true, error: "" }));
 
     try {
-      await signInWithEmailAndPassword(auth, passwordModal.email, passwordModal.password);
+      const developerResponse = await fetch("/api/verify-developer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: profile.email, password: passwordModal.developerPassword })
+      });
+      const developerData = await developerResponse.json();
+
+      if (!developerData.valid) {
+        throw new Error(developerData.error || "Invalid developer password");
+      }
+
+      if (passwordModal.action !== "delete_user") {
+        const managementResponse = await fetch("/api/verify-secret", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "management", secret: passwordModal.password })
+        });
+        const managementData = await managementResponse.json();
+
+        if (!managementData.valid) {
+          throw new Error("Invalid management secret key");
+        }
+      }
 
       if (passwordModal.action === "end_batch") {
         await executeEndBatch(passwordModal.capacity);
@@ -376,10 +453,10 @@ export default function Management({ profile }) {
         await executeDeleteUser(passwordModal.userToDelete);
       }
 
-      setPasswordModal({ isOpen: false, action: null, capacity: null, userToDelete: null, email: profile?.email || "", password: "", error: "", loading: false });
+      setPasswordModal({ isOpen: false, action: null, capacity: null, userToDelete: null, password: "", developerPassword: "", error: "", loading: false });
     } catch (error) {
-      console.error("Authentication failed:", error);
-      setPasswordModal(prev => ({ ...prev, error: "Invalid email or password", loading: false }));
+      console.error("Verification failed:", error);
+      setPasswordModal(prev => ({ ...prev, error: error.message || "Verification failed", loading: false }));
     }
   };
 
@@ -390,33 +467,33 @@ export default function Management({ profile }) {
     }
 
     try {
-      await deleteDoc(doc(db, "users", userToDelete.id));
+      const response = await fetch("/api/delete-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: userToDelete.id,
+          developerEmail: profile.email
+        })
+      });
 
-      if (userToDelete.role === "student" && userToDelete.studentId) {
-        await deleteDoc(doc(db, "studentIds", userToDelete.studentId));
-      }
-      if (userToDelete.role === "faculty" && userToDelete.facultyId) {
-        await deleteDoc(doc(db, "facultyIds", userToDelete.facultyId));
-      }
-
-      try {
-        const isFaculty = userToDelete.role === "faculty";
-        if (userToDelete.department && (isFaculty || userToDelete.yearOfJoin)) {
-          const capId = isFaculty
-            ? `${userToDelete.department}_FACULTY`
-            : `${userToDelete.department}_${userToDelete.yearOfJoin}`;
-
-          const capRef = doc(db, "departmentCapacity", capId);
-          const capSnap = await getDoc(capRef);
-
-          if (capSnap.exists() && capSnap.data().registeredCount > 0) {
-            await updateDoc(capRef, {
-              registeredCount: increment(-1)
-            });
+      if (!response.ok) {
+        let errorMessage = "Failed to delete user";
+        try {
+          const errorText = await response.text();
+          if (errorText) {
+            try {
+              const errorData = JSON.parse(errorText);
+              errorMessage = errorData.error || errorMessage;
+            } catch (e) {
+              errorMessage = errorText;
+            }
+          } else {
+            errorMessage = `Server error (${response.status}) - Empty response body`;
           }
+        } catch (e) {
+          errorMessage = `Server error (${response.status}) - Could not read response`;
         }
-      } catch (capError) {
-        console.error("Failed to update capacity count:", capError);
+        throw new Error(errorMessage);
       }
 
       toast.success(`User ${userToDelete.displayName} deleted successfully.`);
@@ -430,7 +507,7 @@ export default function Management({ profile }) {
     try {
       const usersToUpdate = allUsers.filter(u =>
         u.role === "student" &&
-        u.department === cap.department &&
+        u.department?.toUpperCase() === cap.department?.toUpperCase() &&
         u.yearOfJoin?.toString() === cap.yearOfJoin?.toString()
       );
 
@@ -440,6 +517,7 @@ export default function Management({ profile }) {
       await Promise.all(updatePromises);
 
       await deleteDoc(doc(db, "departmentCapacity", cap.id));
+
       toast.success(`Batch ${cap.department} ${cap.yearOfJoin} ended successfully. Users moved to Alumni.`);
     } catch (error) {
       console.error("End batch error:", error);
@@ -449,24 +527,20 @@ export default function Management({ profile }) {
 
   const executeDeleteCapacity = async (cap) => {
     try {
-      const isFacultyCap = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
-
+      const isFaculty = cap.type === "faculty";
       const usersToDelete = allUsers.filter(u => {
-        if (isFacultyCap) {
-          return u.role === "faculty" && u.department === cap.department;
+        if (isFaculty) {
+          return u.role === "faculty" && u.department?.toUpperCase() === cap.department?.toUpperCase();
         }
         return u.role === "student" &&
-          u.department === cap.department &&
+          u.department?.toUpperCase() === cap.department?.toUpperCase() &&
           u.yearOfJoin?.toString() === cap.yearOfJoin?.toString();
       });
 
       const deletePromises = usersToDelete.map(async (u) => {
         await deleteDoc(doc(db, "users", u.id));
-        if (u.role === "student" && u.studentId) {
+        if (u.studentId) {
           await deleteDoc(doc(db, "studentIds", u.studentId));
-        }
-        if (u.role === "faculty" && u.facultyId) {
-          await deleteDoc(doc(db, "facultyIds", u.facultyId));
         }
       });
       await Promise.all(deletePromises);
@@ -508,8 +582,16 @@ export default function Management({ profile }) {
             title: "New Event Announced!",
             message: `"${event.title}" is now open for registration. Check it out!`,
             link: `/event/${eventId}`,
-            recipients: ["all"],
+            recipients: ["role_student"],
             type: "EVENT"
+          });
+
+          await sendNotification({
+            title: "Event Approved",
+            message: `You successfully approved "${event.title}".`,
+            link: `/event/${eventId}`,
+            recipients: ["role_management"],
+            type: "INFO"
           });
         }
       }
@@ -523,23 +605,23 @@ export default function Management({ profile }) {
     }
   };
 
-  const handleApproveManager = async (managerId) => {
-    setProcessing(managerId);
+  const handleApproveUser = async (userId) => {
+    setProcessing(userId);
     try {
-      const userToApprove = pendingManagers.find(m => m.id === managerId);
-      const isFaculty = userToApprove?.role === "faculty";
+      const userToApprove = pendingManagers.find(m => m.id === userId);
+      const roleName = userToApprove?.role || "user";
 
-      await updateDoc(doc(db, "users", managerId), { isApproved: true });
+      await updateDoc(doc(db, "users", userId), { isApproved: true });
 
       await sendNotification({
         title: "Account Approved",
-        message: `Your ${isFaculty ? "faculty" : "management"} account has been approved. You now have full access.`,
-        link: isFaculty ? "/dashboard" : "/management",
-        recipients: [managerId],
+        message: `Your ${roleName} account has been approved. You now have full access.`,
+        link: "/dashboard",
+        recipients: [userId],
         type: "SYSTEM"
       });
 
-      toast.success(`${isFaculty ? "Faculty" : "Manager"} account approved!`);
+      toast.success(`${roleName} account approved!`);
     } catch (error) {
       console.error("Approve error:", error);
       toast.error("Failed to approve account: " + error.message);
@@ -548,18 +630,45 @@ export default function Management({ profile }) {
     }
   };
 
-  const handleRejectManager = async () => {
+  // 🔥 FIX: Now completely wipes the rejected user data 🔥
+  const handleRejectUser = async () => {
     if (!managerToReject) return;
     setProcessing(managerToReject);
     try {
-      await updateDoc(doc(db, "users", managerToReject), { isApproved: "rejected" });
-      toast.success("Manager request rejected.");
+      const userToReject = pendingManagers.find(m => m.id === managerToReject);
+
+      // Delete user profile
+      await deleteDoc(doc(db, "users", managerToReject));
+
+      // Free up IDs so they can try again
+      if (userToReject?.studentId) {
+        await deleteDoc(doc(db, "studentIds", userToReject.studentId));
+      }
+      if (userToReject?.facultyId) {
+        await deleteDoc(doc(db, "facultyIds", userToReject.facultyId));
+      }
+
+      toast.success("Account request rejected and data cleared.");
       setManagerToReject(null);
     } catch (error) {
-      console.error("Reject manager error:", error);
-      toast.error("Failed to reject manager: " + error.message);
+      console.error("Reject error:", error);
+      toast.error("Failed to reject account. Check permissions.");
     } finally {
       setProcessing(null);
+    }
+  };
+
+  const handleAssignTutor = async (facultyId, batchYear) => {
+    try {
+      const isTutor = !!batchYear;
+      await updateDoc(doc(db, "users", facultyId), {
+        isTutor,
+        tutorOf: batchYear || null
+      });
+      toast.success(isTutor ? `Assigned as tutor for ${batchYear} batch.` : "Removed from tutor role.");
+    } catch (error) {
+      console.error("Assign tutor error:", error);
+      toast.error("Failed to assign tutor: " + error.message);
     }
   };
 
@@ -634,42 +743,42 @@ export default function Management({ profile }) {
           <h1 className="text-3xl md:text-4xl font-serif font-bold text-zinc-900 mb-2">Management Dashboard</h1>
           <p className="text-zinc-500 text-lg">Overview of campus events and student capacities.</p>
         </div>
-        <div className="flex flex-wrap gap-4 pb-4 md:pb-0">
-          {isDeveloper && (
-            <button
-              onClick={syncCapacities}
-              disabled={loading}
-              className="bg-zinc-900 text-white px-4 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider hover:bg-zinc-800 transition-all flex items-center gap-2 disabled:opacity-50"
-            >
-              {loading ? <Loader2 className="animate-spin" size={16} /> : "Sync Counts"}
-            </button>
-          )}
-          {(profile?.role === "management" || isDeveloper) && (
-            <div className="bg-emerald-50 px-4 py-3 rounded-2xl border border-emerald-100 text-center min-w-[100px] shrink-0">
-              <div className="text-2xl font-bold text-emerald-600 mb-1">{pendingManagers.length}</div>
-              <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Pending Mgrs</div>
+        {(profile?.role === "management" || isDeveloper) && (
+          <div className="flex flex-wrap gap-4 pb-4 md:pb-0">
+            {isDeveloper && (
+              <button
+                onClick={syncCapacities}
+                disabled={loading}
+                className="bg-zinc-900 text-white px-4 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider hover:bg-zinc-800 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="animate-spin" size={16} /> : "Sync Counts"}
+              </button>
+            )}
+            {(isDeveloper || isHOD) && pendingManagers.length > 0 && (
+              <div className="bg-emerald-50 px-4 py-3 rounded-2xl border border-emerald-100 text-center min-w-[100px] shrink-0">
+                <div className="text-2xl font-bold text-emerald-600 mb-1">{pendingManagers.length}</div>
+                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Pending Mgrs</div>
+              </div>
+            )}
+            <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
+              <div className="text-2xl font-bold text-zinc-900 mb-1">{pendingEvents.length}</div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Pending</div>
             </div>
-          )}
-          <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
-            <div className="text-2xl font-bold text-zinc-900 mb-1">{pendingEvents.length}</div>
-            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Pending</div>
+            <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
+              <div className="text-2xl font-bold text-zinc-900 mb-1">{capacities.length}</div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Depts</div>
+            </div>
+            <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
+              <div className="text-2xl font-bold text-zinc-900 mb-1">{totalCapacity}</div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Capacity</div>
+            </div>
           </div>
-          <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
-            <div className="text-2xl font-bold text-zinc-900 mb-1">{capacities.length}</div>
-            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Depts</div>
-          </div>
-          <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
-            <div className="text-2xl font-bold text-zinc-900 mb-1">{totalCapacity}</div>
-            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Capacity</div>
-          </div>
-        </div>
+        )}
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-        {/* Left Column: Pending Events & Managers */}
-        <div className="lg:col-span-2 space-y-8">
-
-          {(profile?.role === "management" || isDeveloper) && pendingManagers.length > 0 && (
+      <div className={cn("grid grid-cols-1 gap-8 items-start", (profile?.role === "management" || isDeveloper) ? "lg:grid-cols-3" : "")}>
+        <div className={cn("space-y-8", (profile?.role === "management" || isDeveloper) ? "lg:col-span-2" : "")}>
+          {(profile?.role === "management" || profile?.isTutor || isDeveloper) && (
             <section className="bg-emerald-50/50 border border-emerald-100 rounded-[2.5rem] p-8">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
@@ -677,62 +786,71 @@ export default function Management({ profile }) {
                   Pending Approvals
                 </h2>
               </div>
-              <div className="grid gap-4">
-                {pendingManagers.map(user => (
-                  <div key={user.id} className="bg-white p-6 rounded-2xl border border-emerald-100 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-bold text-xl">
-                        {user.displayName?.[0] || "U"}
+              {pendingManagers.length > 0 ? (
+                <div className="grid gap-4">
+                  {pendingManagers.map(user => (
+                    <div key={user.id} className="bg-white p-6 rounded-2xl border border-emerald-100 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-bold text-xl">
+                          {user.displayName?.[0] || "U"}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-zinc-900 uppercase">{user.displayName}</h4>
+                          <p className="text-sm text-zinc-500">{user.email} • <span className="capitalize">{user.email === "campusbridgeofficials@gmail.com" ? "developer" : user.role}</span></p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-bold text-zinc-900 uppercase">{user.displayName}</h4>
-                        <p className="text-sm text-zinc-500">{user.email} • <span className="capitalize">{user.email === "campusbridgeofficials@gmail.com" ? "developer" : user.role}</span></p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {isDeveloper && (
-                        <button
-                          onClick={() => setPasswordModal({
-                            isOpen: true,
-                            action: "delete_user",
-                            userToDelete: user,
-                            email: profile?.email || "",
-                            password: "",
-                            error: "",
-                            loading: false
-                          })}
-                          className="p-2.5 text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                          title="Delete User Permanently"
-                        >
-                          <Trash2 size={20} />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setManagerToReject(user.id)}
-                        disabled={processing === user.id}
-                        className="p-2.5 text-zinc-400 hover:bg-zinc-100 rounded-xl transition-all"
-                        title="Reject Request"
-                      >
-                        <XCircle size={20} />
-                      </button>
-                      <button
-                        onClick={() => handleApproveManager(user.id)}
-                        disabled={processing === user.id}
-                        className="px-4 md:px-6 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 min-w-[44px] flex items-center justify-center"
-                      >
-                        {processing === user.id ? (
-                          <Loader2 className="animate-spin" size={18} />
-                        ) : (
-                          <>
-                            <CheckCircle2 size={18} className="md:hidden" />
-                            <span className="hidden md:inline">Approve</span>
-                          </>
+                      <div className="flex items-center gap-2">
+                        {isDeveloper && (
+                          <button
+                            onClick={() => setPasswordModal({
+                              isOpen: true,
+                              action: "delete_user",
+                              userToDelete: user,
+                              password: "",
+                              error: "",
+                              loading: false
+                            })}
+                            className="p-2.5 text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                            title="Delete User Permanently"
+                          >
+                            <Trash2 size={20} />
+                          </button>
                         )}
-                      </button>
+                        <button
+                          onClick={() => setManagerToReject(user.id)}
+                          disabled={processing === user.id}
+                          className="p-2.5 text-zinc-400 hover:bg-zinc-100 rounded-xl transition-all"
+                          title="Reject Request"
+                        >
+                          <XCircle size={20} />
+                        </button>
+                        <button
+                          onClick={() => handleApproveUser(user.id)}
+                          disabled={processing === user.id}
+                          className="px-4 md:px-6 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 min-w-[44px] flex items-center justify-center"
+                        >
+                          {processing === user.id ? (
+                            <Loader2 className="animate-spin" size={18} />
+                          ) : (
+                            <>
+                              <CheckCircle2 size={18} className="md:hidden" />
+                              <span className="hidden md:inline">Approve</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-white rounded-2xl border border-emerald-100 shadow-sm">
+                  <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle2 size={32} />
                   </div>
-                ))}
-              </div>
+                  <h3 className="text-lg font-bold text-zinc-900 mb-1">All Caught Up!</h3>
+                  <p className="text-zinc-500">There are no pending account approvals at this time.</p>
+                </div>
+              )}
             </section>
           )}
 
@@ -747,7 +865,7 @@ export default function Management({ profile }) {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
                   <input
                     type="text"
-                    placeholder="Search users or faculty..."
+                    placeholder="Search users..."
                     value={userSearch}
                     onChange={(e) => setUserSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
@@ -756,16 +874,12 @@ export default function Management({ profile }) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                 {allUsers
-                  .filter(u => {
-                    const searchLower = userSearch.toLowerCase();
-                    return (
-                      (u.displayName || "").toLowerCase().includes(searchLower) ||
-                      (u.email || "").toLowerCase().includes(searchLower) ||
-                      (u.studentId || "").toLowerCase().includes(searchLower) ||
-                      (u.facultyId || "").toLowerCase().includes(searchLower) ||
-                      (u.role || "").toLowerCase().includes(searchLower)
-                    );
-                  })
+                  .filter(u =>
+                    u.displayName?.toLowerCase().includes(userSearch.toLowerCase()) ||
+                    u.email?.toLowerCase().includes(userSearch.toLowerCase()) ||
+                    u.studentId?.toLowerCase().includes(userSearch.toLowerCase()) ||
+                    u.facultyId?.toLowerCase().includes(userSearch.toLowerCase())
+                  )
                   .map(u => (
                     <div key={u.id} className="flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group hover:border-emerald-200 transition-all">
                       <div className="flex items-center gap-3 min-w-0">
@@ -773,7 +887,7 @@ export default function Management({ profile }) {
                           {u.photoURL ? (
                             <img src={u.photoURL} alt="" className="w-full h-full object-cover rounded-xl" />
                           ) : (
-                            u.displayName?.[0] || "?"
+                            u.displayName?.[0]
                           )}
                         </div>
                         <div className="min-w-0">
@@ -800,8 +914,8 @@ export default function Management({ profile }) {
                           isOpen: true,
                           action: "delete_user",
                           userToDelete: u,
-                          email: profile?.email || "",
                           password: "",
+                          developerPassword: "",
                           error: "",
                           loading: false
                         })}
@@ -813,17 +927,10 @@ export default function Management({ profile }) {
                     </div>
                   ))
                 }
-
-                {allUsers.length > 0 && allUsers.filter(u => {
-                  const searchLower = userSearch.toLowerCase();
-                  return (
-                    (u.displayName || "").toLowerCase().includes(searchLower) ||
-                    (u.email || "").toLowerCase().includes(searchLower) ||
-                    (u.studentId || "").toLowerCase().includes(searchLower) ||
-                    (u.facultyId || "").toLowerCase().includes(searchLower) ||
-                    (u.role || "").toLowerCase().includes(searchLower)
-                  );
-                }).length === 0 && (
+                {allUsers.length > 0 && allUsers.filter(u =>
+                  u.displayName?.toLowerCase().includes(userSearch.toLowerCase()) ||
+                  u.email?.toLowerCase().includes(userSearch.toLowerCase())
+                ).length === 0 && (
                     <div className="col-span-2 py-12 text-center">
                       <p className="text-sm text-zinc-500">No users found matching "{userSearch}"</p>
                     </div>
@@ -832,7 +939,52 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {/* SECURED: ONLY DEVELOPER CAN PUT ADVERTISEMENTS */}
+          {(isHOD || isDeveloper) && (
+            <section className="bg-white border border-zinc-200 rounded-[2.5rem] p-8 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
+                  <GraduationCap className="text-purple-600" size={24} />
+                  Assign Tutors
+                </h2>
+              </div>
+              <div className="grid gap-4">
+                {allUsers
+                  .filter(u => u.role === "faculty" && (isDeveloper || u.department?.toUpperCase() === hodDepartment))
+                  .map(faculty => (
+                    <div key={faculty.id} className="bg-zinc-50 p-6 rounded-2xl border border-zinc-100 flex flex-col md:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center font-bold text-xl">
+                          {faculty.displayName?.[0] || "F"}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-zinc-900 uppercase">{faculty.displayName}</h4>
+                          <p className="text-sm text-zinc-500">{faculty.email} • {faculty.department}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 w-full md:w-auto">
+                        <select
+                          value={faculty.tutorOf || ""}
+                          onChange={(e) => handleAssignTutor(faculty.id, e.target.value)}
+                          className="w-full md:w-48 px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                        >
+                          <option value="">Not a Tutor</option>
+                          {[...new Set(capacities.filter(c => c.department?.toUpperCase() === faculty.department?.toUpperCase() && c.yearOfJoin !== "FACULTY").map(c => c.yearOfJoin))].sort((a, b) => b - a).map(year => (
+                            <option key={year} value={year}>{year} Batch</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                {allUsers.filter(u => u.role === "faculty" && (isDeveloper || u.department?.toUpperCase() === hodDepartment)).length === 0 && (
+                  <div className="text-center py-8 text-zinc-500">
+                    No faculty members found in this department.
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* 🔥 RESTRICTED ADVERTISEMENT SECTION 🔥 */}
           {isDeveloper && (
             <section className="bg-zinc-900 rounded-[2.5rem] p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
@@ -1156,271 +1308,286 @@ export default function Management({ profile }) {
         </div>
 
         {/* Right Column: Capacity Management */}
-        <div className="space-y-8">
-          <section className="bg-zinc-900 rounded-3xl p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
+        {(profile?.role === "management" || isDeveloper) && (
+          <div className="space-y-8">
+            <section className="bg-zinc-900 rounded-3xl p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
 
-            <h2 className="text-xl font-bold mb-6 flex items-center gap-2 relative z-10">
-              <Users className="text-emerald-400" size={20} />
-              {editingCapacity ? "Update Capacity" : "Add Capacity"}
-            </h2>
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-2 relative z-10">
+                <Users className="text-emerald-400" size={20} />
+                {editingCapacity ? "Update Capacity" : "Add Capacity"}
+              </h2>
 
-            <form onSubmit={handleAddCapacity} className="space-y-4 relative z-10">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Capacity Type</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCapacityType("student")}
-                      className={cn(
-                        "flex-1 py-2 rounded-xl text-xs font-bold transition-all",
-                        capacityType === "student" ? "bg-emerald-500 text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
-                      )}
-                      disabled={!!editingCapacity}
-                    >
-                      Student
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCapacityType("faculty")}
-                      className={cn(
-                        "flex-1 py-2 rounded-xl text-xs font-bold transition-all",
-                        capacityType === "faculty" ? "bg-emerald-500 text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
-                      )}
-                      disabled={!!editingCapacity}
-                    >
-                      Faculty
-                    </button>
-                  </div>
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Department</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={newDept}
-                      onChange={(e) => setNewDept(e.target.value)}
-                      className="flex-1 px-4 py-3 bg-white/10 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-white [&>option]:text-zinc-900"
-                      disabled={!!editingCapacity}
-                    >
-                      <option value="CSE">CSE</option>
-                      <option value="ECE">ECE</option>
-                      <option value="ME">ME</option>
-                      <option value="CE">CE</option>
-                      <option value="EE">EE</option>
-                      <option value="IT">IT</option>
-                      <option value="CUSTOM">Custom...</option>
-                    </select>
-                  </div>
-                </div>
-                {newDept === "CUSTOM" && (
+              <form onSubmit={handleAddCapacity} className="space-y-4 relative z-10">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
-                    <input
-                      type="text"
-                      placeholder="Department Name"
-                      value={customDept}
-                      onChange={(e) => setCustomDept(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/10 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-white placeholder:text-zinc-600"
-                      required
-                      disabled={!!editingCapacity}
-                    />
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Capacity Type</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCapacityType("student")}
+                        className={cn(
+                          "flex-1 py-2 rounded-xl text-xs font-bold transition-all",
+                          capacityType === "student" ? "bg-emerald-500 text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                        )}
+                        disabled={!!editingCapacity}
+                      >
+                        Student
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCapacityType("faculty")}
+                        className={cn(
+                          "flex-1 py-2 rounded-xl text-xs font-bold transition-all",
+                          capacityType === "faculty" ? "bg-emerald-500 text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                        )}
+                        disabled={!!editingCapacity}
+                      >
+                        Faculty
+                      </button>
+                    </div>
                   </div>
-                )}
-                {capacityType === "student" && (
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Year</label>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Department</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={(isHOD && !isDeveloper && !isManagementStaff) ? hodDepartment : newDept}
+                        onChange={(e) => setNewDept(e.target.value)}
+                        className="flex-1 px-4 py-3 bg-white/10 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-white [&>option]:text-zinc-900"
+                        disabled={!!editingCapacity || (isHOD && !isDeveloper && !isManagementStaff)}
+                      >
+                        {(isHOD && !isDeveloper && !isManagementStaff) ? (
+                          <option value={hodDepartment}>{hodDepartment}</option>
+                        ) : (
+                          <>
+                            <option value="CSE">CSE</option>
+                            <option value="ECE">ECE</option>
+                            <option value="ME">ME</option>
+                            <option value="CE">CE</option>
+                            <option value="EEE">EEE</option>
+                            <option value="ICE">ICE</option>
+                            <option value="AS">AS</option>
+                            <option value="IT">IT</option>
+                            <option value="CUSTOM">Custom...</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  </div>
+                  {newDept === "CUSTOM" && (!isHOD || isDeveloper || isManagementStaff) && (
+                    <div className="col-span-2">
+                      <input
+                        type="text"
+                        placeholder="Department Name"
+                        value={customDept}
+                        onChange={(e) => setCustomDept(e.target.value)}
+                        className="w-full px-4 py-3 bg-white/10 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-white placeholder:text-zinc-600"
+                        required
+                        disabled={!!editingCapacity}
+                      />
+                    </div>
+                  )}
+                  {capacityType === "student" && (
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Year</label>
+                      <input
+                        type="number"
+                        placeholder="2024"
+                        value={newYear}
+                        onChange={(e) => setNewYear(e.target.value)}
+                        className="w-full px-4 py-3 bg-white/10 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-white placeholder:text-zinc-600"
+                        disabled={!!editingCapacity}
+                        required
+                      />
+                    </div>
+                  )}
+                  <div className={cn(capacityType === "faculty" ? "col-span-2" : "")}>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Total {capacityType === "student" ? "Students" : "Faculty"}</label>
                     <input
                       type="number"
-                      placeholder="2024"
-                      value={newYear}
-                      onChange={(e) => setNewYear(e.target.value)}
+                      placeholder="60"
+                      value={newTotal}
+                      onChange={(e) => setNewTotal(e.target.value)}
                       className="w-full px-4 py-3 bg-white/10 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-white placeholder:text-zinc-600"
-                      disabled={!!editingCapacity}
+                      required
                     />
                   </div>
-                )}
-                <div className={cn(capacityType === "faculty" ? "col-span-2" : "")}>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Total {capacityType === "student" ? "Students" : "Faculty"}</label>
-                  <input
-                    type="number"
-                    placeholder="60"
-                    value={newTotal}
-                    onChange={(e) => setNewTotal(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-white placeholder:text-zinc-600"
-                    required
-                  />
                 </div>
-              </div>
-              <button
-                type="submit"
-                className="w-full bg-emerald-500 text-white px-6 py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 mt-2"
-              >
-                <Plus size={18} /> Add Configuration
-              </button>
-            </form>
-          </section>
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-500 text-white px-6 py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 mt-2"
+                >
+                  <Plus size={18} /> Add Configuration
+                </button>
+              </form>
+            </section>
 
-          <section>
-            <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
-              <Users size={20} className="text-zinc-400" />
-              Active Configurations
-            </h2>
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-              {capacities.map(cap => {
-                // FIX: Legacy fallback for isFaculty so older capacities still render as Faculty
-                const isFaculty = cap.type === "faculty" || cap.yearOfJoin === "FACULTY";
-                const usersInDept = allUsers
-                  .filter(u => {
-                    if (isFaculty) {
-                      return u.role === "faculty" && u.department === cap.department;
-                    }
-                    return u.role === "student" &&
-                      u.department === cap.department &&
-                      u.yearOfJoin?.toString() === cap.yearOfJoin?.toString();
-                  })
-                  .sort((a, b) => {
-                    if (isFaculty) return (a.displayName || "").localeCompare(b.displayName || "");
-                    return (a.studentId || "").localeCompare(b.studentId || "");
-                  });
-                const isExpanded = expandedCapacityId === cap.id;
+            <section>
+              <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
+                <Users size={20} className="text-zinc-400" />
+                Active Configurations
+              </h2>
+              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                {capacities.map(cap => {
+                  const isFaculty = cap.type === "faculty";
+                  const usersInDept = allUsers
+                    .filter(u => {
+                      if (isFaculty) {
+                        return u.role === "faculty" && u.department?.toUpperCase() === cap.department?.toUpperCase();
+                      }
+                      return u.role === "student" &&
+                        u.department?.toUpperCase() === cap.department?.toUpperCase() &&
+                        u.yearOfJoin?.toString() === cap.yearOfJoin?.toString();
+                    })
+                    .sort((a, b) => {
+                      if (isFaculty) return (a.displayName || "").localeCompare(b.displayName || "");
+                      return (a.studentId || "").localeCompare(b.studentId || "");
+                    });
+                  const isExpanded = expandedCapacityId === cap.id;
 
-                return (
-                  <div key={cap.id} className="group bg-white rounded-2xl border border-zinc-200 overflow-hidden hover:border-zinc-300 transition-all shadow-sm">
-                    <div className="p-4 flex justify-between items-center">
-                      <div className="w-full pr-4 min-w-0 cursor-pointer" onClick={() => setExpandedCapacityId(isExpanded ? null : cap.id)}>
-                        <div className="flex items-center gap-3 mb-1">
-                          <span className={cn(
-                            "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
-                            isFaculty ? "bg-purple-100 text-purple-600" : "bg-emerald-100 text-emerald-600"
-                          )}>
-                            {isFaculty ? "Faculty" : "Student"}
-                          </span>
-                          <h3 className="font-bold text-zinc-900 truncate">{cap.department}</h3>
-                          {!isFaculty && <span className="text-xs font-bold text-zinc-400">{cap.yearOfJoin}</span>}
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                            <div
-                              className={cn(
-                                "h-full transition-all duration-500",
-                                isFaculty ? "bg-purple-500" : "bg-emerald-500"
-                              )}
-                              style={{ width: `${Math.min(100, (cap.registeredCount / cap.totalStudents) * 100)}%` }}
-                            />
+                  // Ensure HODs only see edit buttons for their own department
+                  const canEditCapacity = isDeveloper || isManagementStaff || (isHOD && cap.department?.toUpperCase() === hodDepartment);
+
+                  return (
+                    <div key={cap.id} className="group bg-white rounded-2xl border border-zinc-200 overflow-hidden hover:border-zinc-300 transition-all shadow-sm">
+                      <div className="p-4 flex justify-between items-center">
+                        <div className="w-full pr-4 min-w-0 cursor-pointer" onClick={() => setExpandedCapacityId(isExpanded ? null : cap.id)}>
+                          <div className="flex items-center gap-3 mb-1">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
+                              isFaculty ? "bg-purple-100 text-purple-600" : "bg-emerald-100 text-emerald-600"
+                            )}>
+                              {isFaculty ? "Faculty" : "Student"}
+                            </span>
+                            <h3 className="font-bold text-zinc-900 truncate">{cap.department}</h3>
+                            {!isFaculty && <span className="text-xs font-bold text-zinc-400">{cap.yearOfJoin}</span>}
                           </div>
-                          <span className="text-xs font-bold text-zinc-500 shrink-0">
-                            {cap.registeredCount} / {cap.totalStudents}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0 ml-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingCapacity(cap);
-                            setNewDept(cap.department);
-                            setNewYear(cap.yearOfJoin);
-                            setNewTotal(cap.totalStudents.toString());
-                            setCapacityType(cap.type || "student");
-                          }}
-                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all flex items-center gap-1.5 justify-center"
-                          title="Edit Capacity"
-                        >
-                          <Edit2 size={16} />
-                          <span className="text-[10px] font-bold uppercase tracking-wider hidden md:inline">Edit</span>
-                        </button>
-                        {isDeveloper && !isFaculty && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPasswordModal({ isOpen: true, action: "end_batch", capacity: cap, email: profile?.email || "", password: "", error: "", loading: false });
-                            }}
-                            className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-all flex items-center gap-1.5 justify-center"
-                            title="End Batch"
-                          >
-                            <GraduationCap size={16} />
-                            <span className="text-[10px] font-bold uppercase tracking-wider hidden md:inline">End Batch</span>
-                          </button>
-                        )}
-                        {isDeveloper && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPasswordModal({ isOpen: true, action: "delete_capacity", capacity: cap, email: profile?.email || "", password: "", error: "", loading: false });
-                            }}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all flex items-center gap-1.5 justify-center"
-                            title="Delete Capacity"
-                          >
-                            <Trash2 size={16} />
-                            <span className="text-[10px] font-bold uppercase tracking-wider hidden md:inline">Delete</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <AnimatePresence>
-                      {isExpanded && (
-                        <motion.div
-                          initial={{ height: 0 }}
-                          animate={{ height: "auto" }}
-                          exit={{ height: 0 }}
-                          className="overflow-hidden border-t border-zinc-100 bg-zinc-50/50"
-                        >
-                          <div className="p-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              {usersInDept.length === 0 ? (
-                                <div className="col-span-2 py-4 text-center text-xs text-zinc-400 font-medium">
-                                  No {isFaculty ? "faculty" : "students"} registered yet.
-                                </div>
-                              ) : (
-                                usersInDept.map(user => (
-                                  <div key={user.id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-zinc-100 shadow-sm">
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-bold text-zinc-900 truncate uppercase">{user.displayName}</p>
-                                      <p className="text-[10px] text-zinc-500 font-mono">{isFaculty ? (user.facultyId || "No ID") : (user.studentId || "No ID")}</p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <div className={cn(
-                                        "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                                        isFaculty ? "text-purple-600 bg-purple-50" : "text-emerald-600 bg-emerald-50"
-                                      )}>
-                                        {isFaculty ? "FACULTY" : "STUDENT"}
-                                      </div>
-                                      {isDeveloper && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setPasswordModal({
-                                              isOpen: true,
-                                              action: "delete_user",
-                                              userToDelete: user,
-                                              email: profile?.email || "",
-                                              password: "",
-                                              error: "",
-                                              loading: false
-                                            });
-                                          }}
-                                          className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                          title="Delete User"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))
-                              )}
+                          <div className="flex items-center gap-4">
+                            <div className="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full transition-all duration-500",
+                                  isFaculty ? "bg-purple-500" : "bg-emerald-500"
+                                )}
+                                style={{ width: `${Math.min(100, (cap.registeredCount / cap.totalStudents) * 100)}%` }}
+                              />
                             </div>
+                            <span className="text-xs font-bold text-zinc-500 shrink-0">
+                              {cap.registeredCount} / {cap.totalStudents}
+                            </span>
                           </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          {canEditCapacity && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCapacity(cap);
+                                setNewDept(cap.department);
+                                setNewYear(cap.yearOfJoin);
+                                setNewTotal(cap.totalStudents.toString());
+                                setCapacityType(cap.type || "student");
+                              }}
+                              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all flex items-center gap-1.5 justify-center"
+                              title="Edit Capacity"
+                            >
+                              <Edit2 size={16} />
+                              <span className="text-[10px] font-bold uppercase tracking-wider hidden md:inline">Edit</span>
+                            </button>
+                          )}
+                          {isDeveloper && !isFaculty && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPasswordModal({ isOpen: true, action: "end_batch", capacity: cap, password: "", developerPassword: "", error: "", loading: false });
+                              }}
+                              className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-all flex items-center gap-1.5 justify-center"
+                              title="End Batch"
+                            >
+                              <GraduationCap size={16} />
+                              <span className="text-[10px] font-bold uppercase tracking-wider hidden md:inline">End Batch</span>
+                            </button>
+                          )}
+                          {isDeveloper && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPasswordModal({ isOpen: true, action: "delete_capacity", capacity: cap, password: "", developerPassword: "", error: "", loading: false });
+                              }}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all flex items-center gap-1.5 justify-center"
+                              title="Delete Capacity"
+                            >
+                              <Trash2 size={16} />
+                              <span className="text-[10px] font-bold uppercase tracking-wider hidden md:inline">Delete</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ height: 0 }}
+                            animate={{ height: "auto" }}
+                            exit={{ height: 0 }}
+                            className="overflow-hidden border-t border-zinc-100 bg-zinc-50/50"
+                          >
+                            <div className="p-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {usersInDept.length === 0 ? (
+                                  <div className="col-span-2 py-4 text-center text-xs text-zinc-400 font-medium">
+                                    No {isFaculty ? "faculty" : "students"} registered yet.
+                                  </div>
+                                ) : (
+                                  usersInDept.map(user => (
+                                    <div key={user.id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-zinc-100 shadow-sm">
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-bold text-zinc-900 truncate uppercase">{user.displayName}</p>
+                                        <p className="text-[10px] text-zinc-500 font-mono">{isFaculty ? (user.facultyId || "No ID") : (user.studentId || "No ID")}</p>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <div className={cn(
+                                          "text-[10px] font-bold px-1.5 py-0.5 rounded",
+                                          isFaculty ? "text-purple-600 bg-purple-50" : "text-emerald-600 bg-emerald-50"
+                                        )}>
+                                          {isFaculty ? "FACULTY" : "STUDENT"}
+                                        </div>
+                                        {isDeveloper && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setPasswordModal({
+                                                isOpen: true,
+                                                action: "delete_user",
+                                                userToDelete: user,
+                                                password: "",
+                                                developerPassword: "",
+                                                error: "",
+                                                loading: false
+                                              });
+                                            }}
+                                            className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                            title="Delete User"
+                                          >
+                                            <Trash2 size={14} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -1438,7 +1605,7 @@ export default function Management({ profile }) {
               className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
             >
               <h3 className="text-2xl font-bold text-zinc-900 mb-4">Reject Request</h3>
-              <p className="text-zinc-500 mb-6">Are you sure you want to reject this request? They will not be able to access the dashboard.</p>
+              <p className="text-zinc-500 mb-6">Are you sure you want to reject this request? Their data will be deleted.</p>
 
               <div className="flex gap-3">
                 <button
@@ -1448,7 +1615,7 @@ export default function Management({ profile }) {
                   Cancel
                 </button>
                 <button
-                  onClick={handleRejectManager}
+                  onClick={handleRejectUser}
                   disabled={!!processing}
                   className="flex-1 py-3 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
@@ -1510,7 +1677,6 @@ export default function Management({ profile }) {
           </motion.div>
         )}
       </AnimatePresence>
-
       <AnimatePresence>
         {passwordModal.isOpen && (
           <motion.div
@@ -1537,32 +1703,34 @@ export default function Management({ profile }) {
                     ? `Are you sure you want to delete the ${passwordModal.capacity?.department} capacity? All associated users will be deleted.`
                     : `Are you sure you want to permanently delete user ${passwordModal.userToDelete?.displayName}? This action cannot be undone.`}
                 <br /><br />
-                Please verify your identity to confirm.
+                Please enter the developer password to confirm.
               </p>
 
               <form onSubmit={handlePasswordConfirm}>
                 <input
-                  type="email"
-                  value={passwordModal.email}
-                  onChange={(e) => setPasswordModal(prev => ({ ...prev, email: e.target.value, error: "" }))}
-                  placeholder="Your Account Email"
-                  className={cn(
-                    "w-full p-4 bg-zinc-50 border rounded-xl mb-2 focus:outline-none focus:ring-2 transition-all",
-                    passwordModal.error ? "border-red-300 focus:ring-red-500/20 focus:border-red-500" : "border-zinc-200 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  )}
-                  readOnly
-                />
-                <input
                   type="password"
-                  value={passwordModal.password}
-                  onChange={(e) => setPasswordModal(prev => ({ ...prev, password: e.target.value, error: "" }))}
-                  placeholder="Your Account Password"
+                  value={passwordModal.developerPassword}
+                  onChange={(e) => setPasswordModal(prev => ({ ...prev, developerPassword: e.target.value, error: "" }))}
+                  placeholder="Developer Email Password"
                   className={cn(
                     "w-full p-4 bg-zinc-50 border rounded-xl mb-2 focus:outline-none focus:ring-2 transition-all",
                     passwordModal.error ? "border-red-300 focus:ring-red-500/20 focus:border-red-500" : "border-zinc-200 focus:ring-emerald-500/20 focus:border-emerald-500"
                   )}
                   autoFocus
+                  required
                 />
+                {passwordModal.action !== "delete_user" && (
+                  <input
+                    type="password"
+                    value={passwordModal.password}
+                    onChange={(e) => setPasswordModal(prev => ({ ...prev, password: e.target.value, error: "" }))}
+                    placeholder="Management Secret Key"
+                    className={cn(
+                      "w-full p-4 bg-zinc-50 border rounded-xl mb-2 focus:outline-none focus:ring-2 transition-all",
+                      passwordModal.error ? "border-red-300 focus:ring-red-500/20 focus:border-red-500" : "border-zinc-200 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    )}
+                  />
+                )}
                 {passwordModal.error && (
                   <p className="text-red-500 text-xs font-bold mb-4 ml-1">{passwordModal.error}</p>
                 )}
@@ -1570,14 +1738,14 @@ export default function Management({ profile }) {
                 <div className="flex gap-3 mt-6">
                   <button
                     type="button"
-                    onClick={() => setPasswordModal({ isOpen: false, action: null, capacity: null, userToDelete: null, email: profile?.email || "", password: "", error: "", loading: false })}
+                    onClick={() => setPasswordModal({ isOpen: false, action: null, capacity: null, userToDelete: null, password: "", developerPassword: "", error: "", loading: false })}
                     className="flex-1 py-3 rounded-xl font-bold text-zinc-600 bg-zinc-100 hover:bg-zinc-200 transition-all"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={!passwordModal.email || !passwordModal.password || passwordModal.loading}
+                    disabled={(passwordModal.action !== "delete_user" && (!passwordModal.password && !passwordModal.developerPassword)) || passwordModal.loading}
                     className="flex-1 py-3 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     {passwordModal.loading ? <Loader2 className="animate-spin" size={18} /> : (

@@ -20,13 +20,15 @@ import Complaints from "./pages/Complaints";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import NoticeBoard from "./pages/NoticeBoard";
 import CampusConnect from "./pages/CampusConnect";
+import TutorSection from "./pages/TutorSection";
+
 import Navbar from "./components/Navbar";
 import PopupAd from "./components/PopupAd";
 
 function AppContent({ user, profile, handleAcceptPolicy }) {
   const location = useLocation();
   const isLanding = location.pathname === "/";
-  
+
   // Memoize Login component to prevent unmounting/state reset during auth flicker
   const loginElement = useMemo(() => <Login />, []);
 
@@ -46,7 +48,7 @@ function AppContent({ user, profile, handleAcceptPolicy }) {
               <p className="text-zinc-500 leading-relaxed mb-8">
                 Your account was created, but your profile setup failed. Please sign out and try signing up again.
               </p>
-              <button 
+              <button
                 onClick={() => auth.signOut()}
                 className="w-full py-4 bg-zinc-900 text-white font-bold rounded-2xl hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-900/20"
               >
@@ -56,17 +58,19 @@ function AppContent({ user, profile, handleAcceptPolicy }) {
           </div>
         ) : user && profile && profile.policyAccepted !== true ? (
           <PrivacyPolicy onAccept={handleAcceptPolicy} />
-        ) : user && profile && (profile.role === "management" || profile.role === "faculty") && profile.isApproved === "rejected" ? (
+
+        ) : user && profile && profile.isApproved === "rejected" ? (
           <div className="min-h-[70vh] flex items-center justify-center">
+            {/* 🔥 FIX: Removed role restriction for Rejected screen so it applies to Students too 🔥 */}
             <div className="max-w-md w-full bg-white p-10 rounded-[2.5rem] shadow-2xl border border-zinc-100 text-center">
               <div className="w-20 h-20 bg-red-100 text-red-600 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg shadow-red-600/10">
                 <XCircle size={40} />
               </div>
               <h1 className="text-3xl font-serif font-bold text-zinc-900 mb-4">Account Rejected</h1>
               <p className="text-zinc-500 leading-relaxed mb-8">
-                Your account request has been rejected by the administrator.
+                Your account request has been rejected by the administrator or tutor.
               </p>
-              <button 
+              <button
                 onClick={() => auth.signOut()}
                 className="w-full py-4 bg-zinc-900 text-white font-bold rounded-2xl hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-900/20"
               >
@@ -74,20 +78,22 @@ function AppContent({ user, profile, handleAcceptPolicy }) {
               </button>
             </div>
           </div>
-        ) : user && profile && (profile.role === "management" || profile.role === "faculty") && profile.isApproved === false ? (
+
+        ) : user && profile && profile.isApproved === false ? (
           <div className="min-h-[70vh] flex items-center justify-center">
+            {/* 🔥 FIX: Removed role restriction for Pending screen so it applies to Students too 🔥 */}
             <div className="max-w-md w-full bg-white p-10 rounded-[2.5rem] shadow-2xl border border-zinc-100 text-center">
               <div className="w-20 h-20 bg-amber-100 text-amber-600 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg shadow-amber-600/10">
                 <Clock size={40} />
               </div>
               <h1 className="text-3xl font-serif font-bold text-zinc-900 mb-4">Approval Pending</h1>
               <p className="text-zinc-500 leading-relaxed mb-8">
-                Your account has been created successfully. For security reasons, an administrator must manually verify your credentials before you can access the dashboard.
+                Your account has been created successfully. For security reasons, your {profile.role === "student" ? "Class Tutor" : "Administrator"} must manually verify your credentials before you can access the dashboard.
               </p>
               <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100 text-sm text-zinc-400 font-medium">
-                Contact: <span className="text-zinc-900">campusbridgeofficials@gmail.com</span>
+                Please wait to be verified.
               </div>
-              <button 
+              <button
                 onClick={() => auth.signOut()}
                 className="mt-8 w-full py-4 bg-zinc-900 text-white font-bold rounded-2xl hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-900/20"
               >
@@ -98,53 +104,59 @@ function AppContent({ user, profile, handleAcceptPolicy }) {
         ) : (
           <Routes>
             <Route path="/" element={<Landing />} />
-            <Route 
-              path="/login" 
-              element={!user || !profile ? loginElement : <Navigate to="/dashboard" />} 
+            <Route
+              path="/login"
+              element={!user || !profile ? loginElement : <Navigate to="/dashboard" />}
             />
-            <Route 
-              path="/dashboard" 
-              element={user ? <Dashboard profile={profile} /> : <Navigate to="/login" />} 
+            <Route
+              path="/dashboard"
+              element={user ? <Dashboard profile={profile} /> : <Navigate to="/login" />}
             />
-            <Route 
-              path="/create-event" 
-              element={user && profile?.role === "student" ? <CreateEvent profile={profile} /> : <Navigate to="/dashboard" />} 
+            <Route
+              path="/create-event"
+              element={user && profile?.role === "student" ? <CreateEvent profile={profile} /> : <Navigate to="/dashboard" />}
             />
-            <Route 
-              path="/event/:id" 
-              element={user ? <EventDetails profile={profile} /> : <Navigate to="/login" />} 
+            <Route
+              path="/event/:id"
+              element={user ? <EventDetails profile={profile} /> : <Navigate to="/login" />}
             />
-            <Route 
-              path="/account" 
-              element={user ? <Account profile={profile} /> : <Navigate to="/login" />} 
+            <Route
+              path="/account"
+              element={user ? <Account profile={profile} /> : <Navigate to="/login" />}
             />
-            <Route 
-              path="/management" 
-              element={user && profile?.role === "management" ? <Management profile={profile} /> : <Navigate to="/dashboard" />} 
+
+            <Route
+              path="/tutor-section"
+              element={user && profile?.isTutor ? <TutorSection profile={profile} /> : <Navigate to="/dashboard" />}
             />
-            <Route 
-              path="/my-registrations" 
-              element={user && profile?.role === "student" ? <MyRegistrations profile={profile} /> : <Navigate to="/dashboard" />} 
+
+            <Route
+              path="/management"
+              element={user && (profile?.role === "management" || profile?.type === "hod" || profile?.email === "campusbridgeofficials@gmail.com") ? <Management profile={profile} /> : <Navigate to="/dashboard" />}
             />
-            <Route 
-              path="/my-events" 
-              element={user && profile?.role === "student" ? <MyEvents profile={profile} /> : <Navigate to="/dashboard" />} 
+            <Route
+              path="/my-registrations"
+              element={user && profile?.role === "student" ? <MyRegistrations profile={profile} /> : <Navigate to="/dashboard" />}
             />
-            <Route 
-              path="/complaints" 
-              element={user ? <Complaints profile={profile} /> : <Navigate to="/login" />} 
+            <Route
+              path="/my-events"
+              element={user && profile?.role === "student" ? <MyEvents profile={profile} /> : <Navigate to="/dashboard" />}
             />
-            <Route 
-              path="/notices" 
-              element={user ? <NoticeBoard profile={profile} /> : <Navigate to="/login" />} 
+            <Route
+              path="/complaints"
+              element={user ? <Complaints profile={profile} /> : <Navigate to="/login" />}
             />
-            <Route 
-              path="/campus-connect" 
-              element={user ? <CampusConnect user={user} profile={profile} /> : <Navigate to="/login" />} 
+            <Route
+              path="/notices"
+              element={user ? <NoticeBoard profile={profile} /> : <Navigate to="/login" />}
             />
-            <Route 
-              path="/privacy" 
-              element={<PrivacyPolicy hideAccept={true} />} 
+            <Route
+              path="/campus-connect"
+              element={user ? <CampusConnect user={user} profile={profile} /> : <Navigate to="/login" />}
+            />
+            <Route
+              path="/privacy"
+              element={<PrivacyPolicy hideAccept={true} />}
             />
           </Routes>
         )}
@@ -174,7 +186,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    let unsubscribeProfile = () => {};
+    let unsubscribeProfile = () => { };
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -217,10 +229,10 @@ export default function App() {
   return (
     <Router>
       <NotificationProvider user={user} profile={profile}>
-        <AppContent 
-          user={user} 
-          profile={profile} 
-          handleAcceptPolicy={handleAcceptPolicy} 
+        <AppContent
+          user={user}
+          profile={profile}
+          handleAcceptPolicy={handleAcceptPolicy}
         />
       </NotificationProvider>
     </Router>

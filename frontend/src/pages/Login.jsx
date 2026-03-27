@@ -45,11 +45,11 @@ export default function Login() {
           setAvailableDepartments(deptArray);
           if (!department) setDepartment(deptArray[0]);
         } else {
-          setAvailableDepartments(["CSE", "ECE", "ME", "CE", "EE", "IT"]);
+          setAvailableDepartments(["CSE", "ECE", "ME", "CE", "EEE", "ICE", "AS", "IT"]);
         }
       } catch (error) {
         console.warn("Using fallback departments due to restricted access or empty collection.");
-        setAvailableDepartments(["CSE", "ECE", "ME", "CE", "EE", "IT"]);
+        setAvailableDepartments(["CSE", "ECE", "ME", "CE", "EEE", "ICE", "AS", "IT"]);
         if (!department) setDepartment("CSE");
       }
     };
@@ -64,11 +64,26 @@ export default function Login() {
     else if (department === "ECE") deptCode = "EC";
     else if (department === "ME") deptCode = "ME";
     else if (department === "CE") deptCode = "CE";
-    else if (department === "EE") deptCode = "EE";
+    else if (department === "EEE") deptCode = "EE";
+    else if (department === "ICE") deptCode = "IC";
+    else if (department === "AS") deptCode = "AS";
     else if (department === "IT") deptCode = "IT";
 
     const paddedRollNo = rollNo.padStart(3, '0');
     return `SNM${yearSuffix}${deptCode}${paddedRollNo}`;
+  };
+
+  const SPECIAL_EMAILS = {
+    "managersnm@gmail.com": { role: "management", type: "manager" },
+    "principal@snmimt.edu.in": { role: "management", type: "principal" },
+    "hodcse@snmimt.edu.in": { role: "management", type: "hod", department: "CSE" },
+    "hodme@snmimt.edu.in": { role: "management", type: "hod", department: "ME" },
+    "hodce@snmimt.edu.in": { role: "management", type: "hod", department: "CE" },
+    "hodece@snmimt.edu.in": { role: "management", type: "hod", department: "ECE" },
+    "hodeee@snmimt.edu.in": { role: "management", type: "hod", department: "EEE" },
+    "hodice@snmimt.edu.in": { role: "management", type: "hod", department: "ICE" },
+    "hodas@snmimt.edu.in": { role: "management", type: "hod", department: "AS" },
+    "campusbridgeofficials@gmail.com": { role: "management", type: "developer" }
   };
 
   const handleSubmit = async (e) => {
@@ -76,7 +91,8 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const trimmedEmail = email.trim();
+      const trimmedEmail = email.trim().toLowerCase();
+      const specialUser = SPECIAL_EMAILS[trimmedEmail];
 
       if (isLogin) {
         // --- FIXED: Added the "Bouncer" check for deleted users ---
@@ -275,13 +291,18 @@ export default function Login() {
             uid: user.uid,
             email: trimmedEmail,
             displayName,
-            role,
+            role: specialUser ? specialUser.role : role,
             policyAccepted: false,
-            isApproved: role === "management" ? (trimmedEmail === "campusbridgeofficials@gmail.com") : (role === "faculty" ? false : true),
+            isApproved: specialUser ? true : false,
             createdAt: Date.now(),
           };
 
-          if (role === "student") {
+          if (specialUser) {
+            userData.type = specialUser.type;
+            if (specialUser.department) {
+              userData.department = specialUser.department;
+            }
+          } else if (role === "student") {
             userData.studentId = finalStudentId;
             userData.department = department;
             userData.rollNo = rollNo;
@@ -290,6 +311,8 @@ export default function Login() {
           } else if (role === "faculty") {
             userData.department = department;
             userData.facultyId = facultyId;
+            userData.isTutor = false;
+            userData.tutorOf = null;
           }
 
           await setDoc(doc(db, "users", user.uid), userData);

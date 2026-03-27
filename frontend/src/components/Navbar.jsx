@@ -18,7 +18,8 @@ import {
   Megaphone,
   GraduationCap,
   HelpCircle,
-  Bus // <-- Added Bus icon here
+  Bus,
+  BookOpen // <-- Added BookOpen icon for the Tutor Section
 } from "lucide-react";
 import { useNotifications } from "../context/NotificationContext";
 import NotificationsPanel from "./NotificationsPanel";
@@ -183,6 +184,18 @@ export default function Navbar({ user, profile }) {
                         <span className="text-sm font-medium">My Events</span>
                       </Link>
                     </>
+                  )}
+
+                  {/* 🔥 TUTOR SECTION LINK (DESKTOP) 🔥 */}
+                  {profile.isTutor && (
+                    <Link
+                      to="/tutor-section"
+                      className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
+                      title="Tutor Section"
+                    >
+                      <BookOpen size={20} />
+                      <span className="text-sm font-medium">Tutor Section</span>
+                    </Link>
                   )}
 
                   {(profile.role === "management" || profile.email === "campusbridgeofficials@gmail.com") && (
@@ -416,6 +429,18 @@ export default function Navbar({ user, profile }) {
                             <span className="font-bold">My Events</span>
                           </Link>
                         </>
+                      )}
+
+                      {/* 🔥 TUTOR SECTION LINK (MOBILE) 🔥 */}
+                      {profile.isTutor && (
+                        <Link
+                          to="/tutor-section"
+                          onClick={() => setIsMenuOpen(false)}
+                          className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
+                        >
+                          <BookOpen size={24} />
+                          <span className="font-bold">Tutor Section</span>
+                        </Link>
                       )}
 
                       {(profile.role === "management" || profile.email === "campusbridgeofficials@gmail.com") && (

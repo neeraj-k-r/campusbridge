@@ -35,7 +35,9 @@ import {
   Sparkles,
   Lock,
   Trash2,
-  ShieldCheck
+  ShieldCheck,
+  Loader2,
+  XCircle
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useNotifications } from "../context/NotificationContext";
@@ -179,6 +181,71 @@ async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
   })
 }
 
+// 🔥 THE NEW FLIPKART-STYLE TRACKER 🔥
+const ComplaintTracker = ({ status, rejected }) => {
+  let currentStep = 0;
+  if (rejected) currentStep = -1; // Error state
+  else if (status === "pending") currentStep = 0;
+  else if (status === "verified") currentStep = 1;
+  else if (status === "in-progress") currentStep = 2;
+  else if (status === "resolved") currentStep = 3;
+
+  const steps = [
+    { label: "Submitted" },
+    { label: "Panel Verified" },
+    { label: "In Progress" },
+    { label: "Resolved" }
+  ];
+
+  return (
+    <div className="w-full mt-6 pt-6 border-t border-zinc-100 px-2 sm:px-8 pb-4">
+      <div className="flex items-center justify-between relative">
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1.5 bg-zinc-100 rounded-full" />
+        <div
+          className={cn(
+            "absolute left-0 top-1/2 -translate-y-1/2 h-1.5 rounded-full transition-all duration-1000",
+            rejected ? "bg-red-500" : "bg-emerald-500"
+          )}
+          style={{ width: `${Math.max(0, Math.min(100, (currentStep / (steps.length - 1)) * 100))}%` }}
+        />
+
+        {steps.map((step, idx) => {
+          const isCompleted = idx < currentStep || (idx === currentStep && currentStep === 3);
+          const isActive = idx === currentStep && !rejected;
+          const isError = idx === 0 && rejected; // Show error on first node if rejected before processing
+
+          return (
+            <div key={idx} className="relative z-10 flex flex-col items-center">
+              <div className={cn(
+                "w-6 h-6 sm:w-8 sm:h-8 rounded-full flex items-center justify-center border-4 transition-all duration-500 bg-white",
+                isCompleted ? "border-emerald-500 text-emerald-500" :
+                  isError ? "border-red-500 text-red-500 bg-red-50" :
+                    isActive ? "border-amber-500 text-amber-500" :
+                      "border-zinc-200 text-zinc-300"
+              )}>
+                {isCompleted ? <CheckCircle2 size={16} className="fill-emerald-50 text-emerald-500" /> :
+                  isError ? <XCircle size={16} className="fill-red-50 text-red-500" /> :
+                    isActive ? <Loader2 size={14} className="animate-spin text-amber-500" /> :
+                      <div className="w-2 h-2 rounded-full bg-zinc-200" />}
+              </div>
+              <span className={cn(
+                "text-[9px] sm:text-[10px] font-bold uppercase tracking-wider absolute top-8 sm:top-10 text-center w-24 -ml-12 left-1/2",
+                isCompleted ? "text-emerald-600" :
+                  isError ? "text-red-600" :
+                    isActive ? "text-amber-600" :
+                      "text-zinc-400"
+              )}>
+                {step.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="h-6 sm:h-8" />
+    </div>
+  );
+};
+
 export default function Complaints({ profile }) {
   const [complaints, setComplaints] = useState([]);
   const [newComplaint, setNewComplaint] = useState("");
@@ -203,7 +270,7 @@ export default function Complaints({ profile }) {
   const [selectedFacultyId, setSelectedFacultyId] = useState("");
 
   const isDeveloper = profile?.email === "campusbridgeofficials@gmail.com";
-  const canModerate = isDeveloper || profile?.role === "management";
+  const canModerate = isDeveloper || profile?.role === "management" || profile?.type === "principal" || profile?.type === "hod";
 
   // 🔥 CUSTOM ROLE FORMATTING FOR HOD AND TUTOR 🔥
   const getDisplayRole = () => {
@@ -365,6 +432,7 @@ export default function Complaints({ profile }) {
         likes: [],
         comments: [],
         status: "pending",
+        panelVotes: {}, // 🔥 Initialize poll votes for Panel
         createdAt: serverTimestamp(),
       });
 
@@ -374,7 +442,7 @@ export default function Complaints({ profile }) {
       if (selectedFacultyId) {
         recipients = [selectedFacultyId];
       } else {
-        recipients = ["role_management"];
+        recipients = ["role_management", "role_principal"];
       }
 
       if (!recipients.includes(profile.uid)) {
@@ -493,7 +561,7 @@ export default function Complaints({ profile }) {
     const complaint = complaints.find(c => c.id === complaintId);
     if (!complaint) return;
 
-    if (!isDeveloper && complaint.authorUid !== profile?.uid) return;
+    if (!isDeveloper && complaint.authorUid !== profile?.uid && !canModerate) return;
 
     try {
       await updateDoc(doc(db, "complaints", complaintId), {
@@ -502,7 +570,7 @@ export default function Complaints({ profile }) {
 
       await deleteNotificationsByRelatedId(complaintId);
 
-      toast.success(isDeveloper ? "Complaint deleted by Moderator" : "Complaint deleted");
+      toast.success((isDeveloper || canModerate) ? "Complaint deleted by Moderator" : "Complaint deleted");
       setConfirmingDeleteId(null);
     } catch (error) {
       console.error("Delete complaint error:", error);
@@ -557,7 +625,7 @@ export default function Complaints({ profile }) {
   };
 
   const updateStatus = async (complaintId, newStatus) => {
-    if (profile?.role !== "management" && !isDeveloper) return;
+    if (!canModerate) return;
     const complaintRef = doc(db, "complaints", complaintId);
     const complaint = complaints.find(c => c.id === complaintId);
 
@@ -941,18 +1009,7 @@ export default function Complaints({ profile }) {
                     </div>
 
                     <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border",
-                        complaint.status === "pending" && "bg-amber-50 text-amber-600 border-amber-100",
-                        complaint.status === "in-progress" && "bg-blue-50 text-blue-600 border-blue-100",
-                        complaint.status === "resolved" && "bg-emerald-50 text-emerald-600 border-emerald-100"
-                      )}>
-                        {complaint.status === "pending" && <AlertCircle size={12} />}
-                        {complaint.status === "in-progress" && <Clock size={12} />}
-                        {complaint.status === "resolved" && <CheckCircle2 size={12} />}
-                        {complaint.status.replace("-", " ")}
-                      </div>
-                      {(isDeveloper || complaint.authorUid === profile?.uid) && (
+                      {(isDeveloper || complaint.authorUid === profile?.uid || canModerate) && (
                         <div className="flex items-center gap-1">
                           {confirmingDeleteId === complaint.id ? (
                             <div className="flex items-center gap-1 animate-in fade-in zoom-in duration-200">
@@ -993,6 +1050,9 @@ export default function Complaints({ profile }) {
                     </div>
                   )}
 
+                  {/* 🔥 The New Progress Tracker 🔥 */}
+                  <ComplaintTracker status={complaint.status} rejected={complaint.status === "rejected"} />
+
                   <div className="flex items-center gap-6 pt-2 border-t border-zinc-50">
                     <button
                       onClick={() => handleLike(complaint.id, complaint.likes)}
@@ -1013,20 +1073,26 @@ export default function Complaints({ profile }) {
                     </button>
                   </div>
 
-                  {(canModerate) && (
-                    <div className="flex items-center gap-2 pt-4 border-t border-zinc-50">
-                      <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest mr-2">Update Status:</span>
+                  {(canModerate) && complaint.status !== "rejected" && (
+                    <div className="flex items-center gap-2 pt-4 border-t border-zinc-50 flex-wrap">
+                      <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest mr-2">Admin Actions:</span>
                       <button
                         onClick={() => updateStatus(complaint.id, "in-progress")}
                         className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 transition-colors"
                       >
-                        Will be resolved
+                        Mark In-Progress
                       </button>
                       <button
                         onClick={() => updateStatus(complaint.id, "resolved")}
                         className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-100 hover:bg-emerald-100 transition-colors"
                       >
-                        Mark Solved
+                        Mark Resolved
+                      </button>
+                      <button
+                        onClick={() => updateStatus(complaint.id, "rejected")}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-colors"
+                      >
+                        Reject
                       </button>
                     </div>
                   )}

@@ -5,7 +5,7 @@ import { db, auth } from "../firebase";
 import ImageCropper from "../components/ImageCropper";
 import { toast } from "react-hot-toast";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle2, XCircle, Clock, Calendar, User, Eye, Loader2, Plus, Trash2, Sparkles, Users, ShieldCheck, Edit2, Megaphone, Image as ImageIcon, Send, GraduationCap, Search, Forward } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Calendar, User, Eye, Loader2, Plus, Trash2, Sparkles, Users, ShieldCheck, Edit2, Megaphone, Image as ImageIcon, Send, GraduationCap, Search, Forward, AlertCircle, MessageSquare } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "react-router-dom";
 import { cn } from "../lib/utils";
@@ -39,6 +39,9 @@ export default function Management({ profile }) {
   const [pendingManagers, setPendingManagers] = useState([]);
   const [capacities, setCapacities] = useState([]);
   const [ads, setAds] = useState([]);
+  // 🔥 NEW STATE: Verified Complaints from Panel 🔥
+  const [verifiedComplaints, setVerifiedComplaints] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(null);
   const [adLoading, setAdLoading] = useState(false);
@@ -74,17 +77,19 @@ export default function Management({ profile }) {
   const [adDisplayStrategy, setAdDisplayStrategy] = useState("round-robin");
   const [strategyLoading, setStrategyLoading] = useState(false);
 
-  // --- BULLETPROOF ROLE CHECKS ---
-  const isDeveloper = profile?.email?.toLowerCase() === "campusbridgeofficials@gmail.com" || profile?.type === "developer";
+  const userEmail = profile?.email?.toLowerCase() || "";
+  const isDeveloper = userEmail === "campusbridgeofficials@gmail.com" || profile?.type === "developer";
+  const isPrincipalEmail = userEmail === "principal@snmimt.edu.in";
 
   const hodDepartment = profile?.department?.toUpperCase() || profile?.email?.match(/^hod([a-z]+)@/i)?.[1]?.toUpperCase();
 
   const isHOD = profile?.type === "hod" ||
-    (profile?.role === "management" && profile?.email?.toLowerCase().startsWith("hod")) ||
-    (profile?.role === "management" && !!hodDepartment && !isDeveloper);
+    (profile?.role === "management" && userEmail.startsWith("hod")) ||
+    (profile?.role === "management" && !!hodDepartment && !isDeveloper && !isPrincipalEmail);
 
-  const isManagementStaff = profile?.type === "manager" || profile?.type === "principal" || (profile?.role === "management" && !isHOD && !isDeveloper);
-  const isPrincipal = profile?.type === "principal" || isDeveloper || (profile?.role === "management" && !isHOD);
+  const isManagementStaff = isPrincipalEmail || profile?.type === "manager" || profile?.type === "principal" || (profile?.role === "management" && !isHOD && !isDeveloper);
+  const isPrincipal = isPrincipalEmail || profile?.type === "principal" || isDeveloper || (profile?.role === "management" && !isHOD);
+  const hasManagementAccess = profile?.role === "management" || isDeveloper || isPrincipalEmail || isPrincipal;
 
   useEffect(() => {
     if (isHOD && hodDepartment && !editingCapacity) {
@@ -119,6 +124,15 @@ export default function Management({ profile }) {
       (error) => console.error("Events listener error:", error)
     );
 
+    // 🔥 NEW: Fetch Verified Complaints for Principal 🔥
+    let unsubscribeComplaints = () => { };
+    if (isPrincipal) {
+      const qComplaints = query(collection(db, "complaints"), where("status", "==", "verified"));
+      unsubscribeComplaints = onSnapshot(qComplaints, (snapshot) => {
+        setVerifiedComplaints(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+    }
+
     const qCap = collection(db, "departmentCapacity");
     const unsubscribeCap = onSnapshot(qCap,
       (querySnapshot) => {
@@ -133,7 +147,7 @@ export default function Management({ profile }) {
     );
 
     let unsubscribeUsers = () => { };
-    if (profile?.role === "management" || isDeveloper) {
+    if (hasManagementAccess) {
       const qUsers = query(collection(db, "users"), where("role", "in", ["student", "faculty", "alumni", "management"]));
       unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
         setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -151,10 +165,10 @@ export default function Management({ profile }) {
     let unsubscribeAds = () => { };
     let unsubscribeStrategy = () => { };
 
-    if (profile?.role === "management" || profile?.isTutor || isDeveloper) {
+    if (hasManagementAccess || profile?.isTutor) {
       let qPending;
 
-      if (profile?.role === "management" || isDeveloper) {
+      if (hasManagementAccess) {
         qPending = query(
           collection(db, "users"),
           where("isApproved", "==", false)
@@ -174,7 +188,7 @@ export default function Management({ profile }) {
           const allPending = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           let filteredPending = [];
 
-          if (isDeveloper) {
+          if (isDeveloper || isPrincipal) {
             filteredPending = allPending;
           } else if (isManagementStaff) {
             filteredPending = allPending.filter(u => u.role !== "student" && u.role !== "faculty");
@@ -226,6 +240,7 @@ export default function Management({ profile }) {
         unsubscribePendingUsers();
         unsubscribeAds();
         unsubscribeStrategy();
+        unsubscribeComplaints();
       };
     }
 
@@ -234,10 +249,10 @@ export default function Management({ profile }) {
       unsubscribeCap();
       unsubscribeUsers();
       unsubscribePendingUsers();
+      unsubscribeComplaints();
     };
-  }, [profile, isDeveloper, isHOD, isManagementStaff, hodDepartment]);
+  }, [profile, isDeveloper, isPrincipal, isHOD, isManagementStaff, hodDepartment, hasManagementAccess]);
 
-  // 🔥 Intelligent Event Filtering based on the 2.5-hour timeouts 🔥
   const myPendingEvents = pendingEvents.filter(event => {
     const effectiveStage = getEffectiveStage(event);
 
@@ -256,7 +271,6 @@ export default function Management({ profile }) {
       const effectiveStage = getEffectiveStage(event);
 
       if (isHOD && !isPrincipal && effectiveStage === "hod") {
-        // Forward to Principal
         await updateDoc(doc(db, "events", event.id), {
           approvalStage: "principal",
           stageUpdatedAt: Date.now()
@@ -272,7 +286,6 @@ export default function Management({ profile }) {
         toast.success("Approved and forwarded to Principal!");
 
       } else if (isPrincipal && effectiveStage === "principal") {
-        // Final Approval! Post to Dashboard!
         await updateDoc(doc(db, "events", event.id), { status: "approved" });
 
         await sendNotification({
@@ -283,7 +296,6 @@ export default function Management({ profile }) {
           type: "EVENT"
         });
 
-        // Notify Everyone!
         await sendNotification({
           title: "New Event Announced!",
           message: `"${event.title}" is now open. Check it out!`,
@@ -336,6 +348,16 @@ export default function Management({ profile }) {
       toast.error("Failed to reject event.");
     } finally {
       setProcessing(null);
+    }
+  };
+
+  // 🔥 NEW: Action Handler for Complaints 🔥
+  const handleComplaintAction = async (complaintId, newStatus) => {
+    try {
+      await updateDoc(doc(db, "complaints", complaintId), { status: newStatus });
+      toast.success(`Complaint moved to ${newStatus}`);
+    } catch (error) {
+      toast.error("Failed to update complaint.");
     }
   };
 
@@ -481,17 +503,6 @@ export default function Management({ profile }) {
     }
   };
 
-  const safeFormatDate = (dateValue, formatStr = "MMM d, yyyy") => {
-    try {
-      if (!dateValue) return "Date Pending";
-      const dateObj = new Date(dateValue);
-      if (isNaN(dateObj.getTime())) return "Invalid Date";
-      return format(dateObj, formatStr);
-    } catch (e) {
-      return "Date Error";
-    }
-  };
-
   const handleAddCapacity = async (e) => {
     e.preventDefault();
 
@@ -599,28 +610,11 @@ export default function Management({ profile }) {
       });
 
       if (!response.ok) {
-        let errorMessage = "Failed to delete user";
-        try {
-          const errorText = await response.text();
-          if (errorText) {
-            try {
-              const errorData = JSON.parse(errorText);
-              errorMessage = errorData.error || errorMessage;
-            } catch (e) {
-              errorMessage = errorText;
-            }
-          } else {
-            errorMessage = `Server error (${response.status}) - Empty response body`;
-          }
-        } catch (e) {
-          errorMessage = `Server error (${response.status}) - Could not read response`;
-        }
-        throw new Error(errorMessage);
+        throw new Error("Failed to delete user");
       }
 
       toast.success(`User ${userToDelete.displayName} deleted successfully.`);
     } catch (error) {
-      console.error("Delete user error:", error);
       toast.error("Failed to delete user: " + error.message);
     }
   };
@@ -639,10 +633,8 @@ export default function Management({ profile }) {
       await Promise.all(updatePromises);
 
       await deleteDoc(doc(db, "departmentCapacity", cap.id));
-
-      toast.success(`Batch ${cap.department} ${cap.yearOfJoin} ended successfully. Users moved to Alumni.`);
+      toast.success(`Batch ${cap.department} ${cap.yearOfJoin} ended successfully.`);
     } catch (error) {
-      console.error("End batch error:", error);
       toast.error("Failed to end batch");
     }
   };
@@ -668,10 +660,8 @@ export default function Management({ profile }) {
       await Promise.all(deletePromises);
 
       await deleteDoc(doc(db, "departmentCapacity", cap.id));
-
       toast.success(`Capacity deleted and ${usersToDelete.length} users removed.`);
     } catch (error) {
-      console.error("Delete capacity error:", error);
       toast.error("Failed to delete capacity");
     }
   };
@@ -680,22 +670,17 @@ export default function Management({ profile }) {
     setProcessing(userId);
     try {
       const userToApprove = pendingManagers.find(m => m.id === userId);
-      const roleName = userToApprove?.role || "user";
-
       await updateDoc(doc(db, "users", userId), { isApproved: true });
-
       await sendNotification({
         title: "Account Approved",
-        message: `Your ${roleName} account has been approved. You now have full access.`,
+        message: `Your account has been approved. You now have full access.`,
         link: "/dashboard",
         recipients: [userId],
         type: "SYSTEM"
       });
-
-      toast.success(`${roleName} account approved!`);
+      toast.success(`Account approved!`);
     } catch (error) {
-      console.error("Approve error:", error);
-      toast.error("Failed to approve account: " + error.message);
+      toast.error("Failed to approve account.");
     } finally {
       setProcessing(null);
     }
@@ -706,23 +691,17 @@ export default function Management({ profile }) {
     setProcessing(managerToReject);
     try {
       const userToReject = pendingManagers.find(m => m.id === managerToReject);
-
-      // Delete user profile
       await deleteDoc(doc(db, "users", managerToReject));
-
-      // Free up IDs so they can try again
       if (userToReject?.studentId) {
         await deleteDoc(doc(db, "studentIds", userToReject.studentId));
       }
       if (userToReject?.facultyId) {
         await deleteDoc(doc(db, "facultyIds", userToReject.facultyId));
       }
-
       toast.success("Account request rejected and data cleared.");
       setManagerToReject(null);
     } catch (error) {
-      console.error("Reject error:", error);
-      toast.error("Failed to reject account. Check permissions.");
+      toast.error("Failed to reject account.");
     } finally {
       setProcessing(null);
     }
@@ -737,8 +716,7 @@ export default function Management({ profile }) {
       });
       toast.success(isTutor ? `Assigned as tutor for ${batchYear} batch.` : "Removed from tutor role.");
     } catch (error) {
-      console.error("Assign tutor error:", error);
-      toast.error("Failed to assign tutor: " + error.message);
+      toast.error("Failed to assign tutor.");
     }
   };
 
@@ -771,13 +749,13 @@ export default function Management({ profile }) {
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-8 border-b border-zinc-100">
         <div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-100 text-zinc-600 text-xs font-bold uppercase tracking-wider mb-4">
-            <Sparkles size={12} className="text-emerald-500" />
-            <span>Admin Control Center</span>
+            <ShieldCheck size={12} className="text-blue-500" />
+            <span>{isPrincipal ? "Principal Dashboard" : `${hodDepartment} Department Hub`}</span>
           </div>
           <h1 className="text-3xl md:text-4xl font-serif font-bold text-zinc-900 mb-2">Management Dashboard</h1>
-          <p className="text-zinc-500 text-lg">Overview of campus events and student capacities.</p>
+          <p className="text-zinc-500 text-lg">Overview of campus operations and approvals.</p>
         </div>
-        {(profile?.role === "management" || isDeveloper) && (
+        {hasManagementAccess && (
           <div className="flex flex-wrap gap-4 pb-4 md:pb-0">
             {isDeveloper && (
               <button
@@ -788,31 +766,106 @@ export default function Management({ profile }) {
                 {loading ? <Loader2 className="animate-spin" size={16} /> : "Sync Counts"}
               </button>
             )}
-            {(isDeveloper || isHOD) && pendingManagers.length > 0 && (
-              <div className="bg-emerald-50 px-4 py-3 rounded-2xl border border-emerald-100 text-center min-w-[100px] shrink-0">
-                <div className="text-2xl font-bold text-emerald-600 mb-1">{pendingManagers.length}</div>
-                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Pending Mgrs</div>
-              </div>
-            )}
             <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
               <div className="text-2xl font-bold text-zinc-900 mb-1">{myPendingEvents.length}</div>
               <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Pending Events</div>
             </div>
+            {isPrincipal && (
+              <div className="bg-red-50 px-4 py-3 rounded-2xl border border-red-100 text-center min-w-[80px] shrink-0">
+                <div className="text-2xl font-bold text-red-600 mb-1">{verifiedComplaints.length}</div>
+                <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Verified Complaints</div>
+              </div>
+            )}
             <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
               <div className="text-2xl font-bold text-zinc-900 mb-1">{capacities.length}</div>
               <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Depts</div>
-            </div>
-            <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
-              <div className="text-2xl font-bold text-zinc-900 mb-1">{totalCapacity}</div>
-              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Capacity</div>
             </div>
           </div>
         )}
       </header>
 
-      <div className={cn("grid grid-cols-1 gap-8 items-start", (profile?.role === "management" || isDeveloper) ? "lg:grid-cols-3" : "")}>
-        <div className={cn("space-y-8", (profile?.role === "management" || isDeveloper) ? "lg:col-span-2" : "")}>
-          {(profile?.role === "management" || profile?.isTutor || isDeveloper) && (
+      {/* 🔥 NEW SECTION: VERIFIED COMPLAINTS FOR PRINCIPAL 🔥 */}
+      {isPrincipal && verifiedComplaints.length > 0 && (
+        <section className="bg-red-50/50 border border-red-100 rounded-[2.5rem] p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
+              <AlertCircle className="text-red-500" size={24} />
+              Panel-Verified Complaints
+            </h2>
+            <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border border-red-200">
+              Action Required
+            </span>
+          </div>
+          <div className="grid gap-4">
+            <AnimatePresence mode="popLayout">
+              {verifiedComplaints.map(complaint => {
+                const votes = complaint.panelVotes || {};
+                const agreeCount = Object.values(votes).filter(v => v === "agree").length;
+                const disagreeCount = Object.values(votes).filter(v => v === "disagree").length;
+                const neitherCount = Object.values(votes).filter(v => v === "neither").length;
+
+                return (
+                  <motion.div
+                    key={complaint.id}
+                    layout
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="bg-white p-6 rounded-2xl border border-red-200 shadow-sm flex flex-col gap-4"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-zinc-900 text-white flex items-center justify-center font-bold">
+                          {complaint.authorCodeName.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-zinc-900">{complaint.authorCodeName}</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border text-emerald-600 bg-emerald-50 border-emerald-100">
+                              Real: {complaint.authorRealName}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-zinc-400">
+                            {complaint.createdAt?.toDate ? format(complaint.createdAt.toDate(), "MMM d, yyyy h:mm a") : ""}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-bold bg-zinc-50 px-3 py-1.5 rounded-lg border border-zinc-200">
+                        <span className="text-emerald-600">{agreeCount} Agree</span> •
+                        <span className="text-red-600">{disagreeCount} Disagree</span> •
+                        <span className="text-amber-600">{neitherCount} Neither</span>
+                      </div>
+                    </div>
+
+                    <p className="text-zinc-700 font-medium bg-zinc-50 p-4 rounded-xl border border-zinc-100">
+                      {complaint.text}
+                    </p>
+
+                    <div className="flex items-center justify-end gap-2 pt-2">
+                      <button
+                        onClick={() => handleComplaintAction(complaint.id, "in-progress")}
+                        className="px-4 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl font-bold text-sm transition-all"
+                      >
+                        Mark In-Progress
+                      </button>
+                      <button
+                        onClick={() => handleComplaintAction(complaint.id, "resolved")}
+                        className="px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl font-bold text-sm transition-all shadow-md shadow-emerald-600/20"
+                      >
+                        Resolve Complaint
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        </section>
+      )}
+
+      <div className={cn("grid grid-cols-1 gap-8 items-start", hasManagementAccess ? "lg:grid-cols-3" : "")}>
+        <div className={cn("space-y-8", hasManagementAccess ? "lg:col-span-2" : "")}>
+          {(hasManagementAccess || profile?.isTutor) && (
             <section className="bg-emerald-50/50 border border-emerald-100 rounded-[2.5rem] p-8">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
@@ -888,7 +941,7 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {isDeveloper && (
+          {hasManagementAccess && (
             <section className="bg-white border border-zinc-200 rounded-[2.5rem] p-8 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
@@ -943,21 +996,44 @@ export default function Management({ profile }) {
                           </div>
                         </div>
                       </div>
-                      <button
-                        onClick={() => setPasswordModal({
-                          isOpen: true,
-                          action: "delete_user",
-                          userToDelete: u,
-                          password: "",
-                          developerPassword: "",
-                          error: "",
-                          loading: false
-                        })}
-                        className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shrink-0"
-                        title="Delete User Permanently"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isPrincipal && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await updateDoc(doc(db, "users", u.id), { isPanelMember: !u.isPanelMember });
+                                toast.success(`${u.displayName} is ${!u.isPanelMember ? 'now' : 'no longer'} a Panel Member.`);
+                              } catch (error) {
+                                toast.error("Failed to update panel status.");
+                              }
+                            }}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border",
+                              u.isPanelMember
+                                ? "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                : "bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100"
+                            )}
+                          >
+                            {u.isPanelMember ? "Remove Panel" : "Make Panel"}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setPasswordModal({
+                            isOpen: true,
+                            action: "delete_user",
+                            userToDelete: u,
+                            password: "",
+                            developerPassword: "",
+                            error: "",
+                            loading: false
+                          })}
+                          className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                          title="Delete User Permanently"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
                     </div>
                   ))
                 }
@@ -1233,7 +1309,7 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {/* 🔥 DYNAMIC EVENT APPROVAL PIPELINE 🔥 */}
+          {/* 🔥 EVENT APPROVAL PIPELINE 🔥 */}
           <section>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
@@ -1336,7 +1412,7 @@ export default function Management({ profile }) {
         </div>
 
         {/* Right Column: Capacity Management */}
-        {(profile?.role === "management" || isDeveloper) && (
+        {hasManagementAccess && (
           <div className="space-y-8">
             <section className="bg-zinc-900 rounded-3xl p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />

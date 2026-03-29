@@ -1,45 +1,60 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
   serverTimestamp,
   deleteDoc,
-  doc,
-  getDocs,
-  where
+  doc
 } from "firebase/firestore";
 import { toast } from "react-hot-toast";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  Megaphone, 
-  Image as ImageIcon, 
-  Send, 
-  Loader2, 
-  Trash2, 
+import {
+  Megaphone,
+  Image as ImageIcon,
+  Send,
+  Loader2,
+  Trash2,
   Clock,
   User,
   ShieldCheck,
-  BadgeCheck,
-  FileText
+  BadgeCheck
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useNotifications } from "../context/NotificationContext";
 import { formatDistanceToNow } from "date-fns";
 
-// Cloudinary Config (Reused from CreateEvent)
+// Cloudinary Config
 const CLOUDINARY_CLOUD_NAME = "dbyraj0xm";
 const CLOUDINARY_UPLOAD_PRESET = "campus_posters";
+
+// 🔥 Dynamic Role Formatter 🔥
+const formatUserRole = (u) => {
+  if (!u) return "User";
+  if (u.email === "campusbridgeofficials@gmail.com" || u.type === "developer") return "Developer";
+
+  if (u.type === "hod" || (u.email && u.email.toLowerCase().startsWith("hod"))) {
+    const dept = u.department || u.email.match(/^hod([a-z]+)@/i)?.[1]?.toUpperCase() || "Dept";
+    return `HOD of ${dept}`;
+  }
+
+  if (u.isTutor === true || u.isTutor === "true" || !!u.tutorOf) {
+    return `Tutor ${u.tutorOf ? u.tutorOf + ' Batch' : ''}`.trim();
+  }
+
+  if (u.role) return u.role.charAt(0).toUpperCase() + u.role.slice(1);
+  return "User";
+};
 
 export default function NoticeBoard({ profile }) {
   const [notices, setNotices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const { sendNotification, deleteNotificationsByRelatedId } = useNotifications();
-  
+
   // Form State
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
@@ -48,13 +63,13 @@ export default function NoticeBoard({ profile }) {
 
   const isDeveloper = profile?.email === "campusbridgeofficials@gmail.com";
   const role = profile?.role?.toLowerCase();
-  const isManagement = role === "management";
+  const isManagement = role === "management" || profile?.type === "hod" || (profile?.email && profile.email.toLowerCase().startsWith("hod"));
   const isFaculty = role === "faculty";
   const canPost = isDeveloper || isManagement || isFaculty;
 
   useEffect(() => {
     const q = query(collection(db, "notices"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, 
+    const unsubscribe = onSnapshot(q,
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({
           id: doc.id,
@@ -125,8 +140,9 @@ export default function NoticeBoard({ profile }) {
         title,
         message,
         imageUrl,
-        authorName: profile.displayName,
-        authorRole: isDeveloper ? "Developer" : profile.role,
+        // 🔥 Name is explicitly saved here 🔥
+        authorName: isDeveloper ? "System Admin" : profile.displayName,
+        authorRole: formatUserRole(profile),
         authorUid: profile.uid,
         createdAt: serverTimestamp(),
       });
@@ -136,7 +152,7 @@ export default function NoticeBoard({ profile }) {
         title: "New Notice: " + title,
         message: message.substring(0, 50) + (message.length > 50 ? "..." : ""),
         link: "/notices",
-        recipients: ["all"], 
+        recipients: ["all"],
         type: "INFO",
         relatedId: noticeRef.id
       });
@@ -160,12 +176,8 @@ export default function NoticeBoard({ profile }) {
   const confirmDelete = async () => {
     if (!deleteId) return;
     try {
-      // 1. Delete the notice
       await deleteDoc(doc(db, "notices", deleteId));
-
-      // 2. Delete associated notifications
       await deleteNotificationsByRelatedId(deleteId);
-
       toast.success("Notice and associated notifications deleted");
     } catch (error) {
       console.error("Error deleting notice:", error);
@@ -221,7 +233,7 @@ export default function NoticeBoard({ profile }) {
       </header>
 
       {canPost && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="bg-white border border-zinc-200 rounded-[2rem] p-6 md:p-8 shadow-sm"
@@ -233,7 +245,8 @@ export default function NoticeBoard({ profile }) {
             <div>
               <h3 className="font-bold text-zinc-900">Post a New Notice</h3>
               <p className="text-xs text-zinc-500 font-medium">
-                Posting as <span className="uppercase">{isDeveloper ? "Developer" : profile.role}</span>
+                {/* 🔥 Shows Name + Role dynamically 🔥 */}
+                Posting as <span className="font-bold text-zinc-800">{isDeveloper ? "System Admin" : profile.displayName}</span> <span className="uppercase text-zinc-400">({formatUserRole(profile)})</span>
               </p>
             </div>
           </div>
@@ -248,7 +261,7 @@ export default function NoticeBoard({ profile }) {
                 className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900/10 transition-all font-bold text-lg"
               />
             </div>
-            
+
             <div>
               <textarea
                 value={message}
@@ -335,69 +348,80 @@ export default function NoticeBoard({ profile }) {
           </div>
         ) : (
           <AnimatePresence mode="popLayout">
-            {notices.map((notice) => (
-              <motion.div
-                key={notice.id}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-white border border-zinc-200 rounded-[2rem] overflow-hidden shadow-sm group"
-              >
-                {notice.imageUrl && (
-                  <div className="w-full bg-zinc-900 flex items-center justify-center overflow-hidden border-b border-zinc-100">
-                    <img 
-                      src={notice.imageUrl} 
-                      alt={notice.title} 
-                      className="w-full h-auto max-h-[600px] object-contain group-hover:scale-[1.02] transition-transform duration-500"
-                    />
-                  </div>
-                )}
-                <div className="p-6 md:p-8">
-                  <div className="flex items-start justify-between gap-4 mb-6">
-                    <div className="min-w-0 flex-1">
-                      <h2 className="text-xl md:text-2xl font-bold text-zinc-900 mb-3 leading-tight break-words">{notice.title}</h2>
-                      <div className="flex flex-wrap items-center gap-y-2 gap-x-3 text-xs font-medium text-zinc-500">
-                        <div className="flex items-center gap-1.5 bg-zinc-50 px-2 py-1 rounded-md border border-zinc-100 shrink-0">
-                          <User size={12} />
-                          <span>{notice.authorName}</span>
-                        </div>
-                        <div className={cn(
-                          "flex items-center gap-1.5 px-2 py-1 rounded-md border uppercase tracking-wider text-[10px] font-bold shrink-0",
-                          notice.authorRole === "Developer" && "bg-blue-50 text-blue-600 border-blue-100",
-                          notice.authorRole === "management" && "bg-purple-50 text-purple-600 border-purple-100",
-                          notice.authorRole === "faculty" && "bg-emerald-50 text-emerald-600 border-emerald-100"
-                        )}>
-                          <BadgeCheck size={12} />
-                          <span>{notice.authorRole}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <Clock size={12} />
-                          <span>
-                            {notice.createdAt?.toDate 
-                              ? formatDistanceToNow(notice.createdAt.toDate(), { addSuffix: true }) 
-                              : "Just now"}
-                          </span>
+            {notices.map((notice) => {
+              const roleText = notice.authorRole || "";
+              const isNoticeDev = roleText === "Developer";
+              const isNoticeMgmt = roleText.toLowerCase().includes("management") || roleText.includes("HOD") || roleText.includes("Principal");
+              const isNoticeFaculty = roleText.toLowerCase().includes("faculty") || roleText.includes("Tutor");
+
+              return (
+                <motion.div
+                  key={notice.id}
+                  layout
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-white border border-zinc-200 rounded-[2rem] overflow-hidden shadow-sm group"
+                >
+                  {notice.imageUrl && (
+                    <div className="w-full bg-zinc-900 flex items-center justify-center overflow-hidden border-b border-zinc-100">
+                      <img
+                        src={notice.imageUrl}
+                        alt={notice.title}
+                        className="w-full h-auto max-h-[600px] object-contain group-hover:scale-[1.02] transition-transform duration-500"
+                      />
+                    </div>
+                  )}
+                  <div className="p-6 md:p-8">
+                    <div className="flex items-start justify-between gap-4 mb-6">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="text-xl md:text-2xl font-bold text-zinc-900 mb-3 leading-tight break-words">{notice.title}</h2>
+                        <div className="flex flex-wrap items-center gap-y-2 gap-x-3 text-xs font-medium text-zinc-500">
+                          {/* 🔥 Name and Role dynamically displayed together 🔥 */}
+                          <div className="flex items-center gap-1.5 bg-zinc-50 px-2.5 py-1.5 rounded-lg border border-zinc-200 shrink-0 shadow-sm">
+                            <User size={14} className="text-zinc-400" />
+                            <span className="font-bold text-zinc-800">{notice.authorName}</span>
+                            <span className="text-zinc-300">•</span>
+                            <span className={cn(
+                              "uppercase tracking-wider text-[10px] font-bold flex items-center gap-1",
+                              isNoticeDev ? "text-blue-600" :
+                                isNoticeMgmt ? "text-red-600" :
+                                  isNoticeFaculty ? "text-purple-600" :
+                                    "text-zinc-600"
+                            )}>
+                              <BadgeCheck size={12} />
+                              {roleText}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0 bg-zinc-50 px-2.5 py-1.5 rounded-lg border border-zinc-200">
+                            <Clock size={12} className="text-zinc-400" />
+                            <span>
+                              {notice.createdAt?.toDate
+                                ? formatDistanceToNow(notice.createdAt.toDate(), { addSuffix: true })
+                                : "Just now"}
+                            </span>
+                          </div>
                         </div>
                       </div>
+
+                      {(isDeveloper || (isManagement && !isNoticeDev) || (isFaculty && notice.authorUid === profile?.uid)) && (
+                        <button
+                          onClick={() => setDeleteId(notice.id)}
+                          className="text-[10px] md:text-xs font-bold text-red-500 md:text-zinc-400 hover:text-red-600 transition-all uppercase tracking-wider shrink-0 pt-1 px-2 py-1 -mr-2"
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
-                    {/* Delete Button: Developer can delete all. Management can delete non-dev notices. Faculty can only delete their own. */ }
-                    {(isDeveloper || (isManagement && notice.authorRole !== 'Developer') || (isFaculty && notice.authorUid === profile?.uid)) && (
-                      <button
-                        onClick={() => setDeleteId(notice.id)}
-                        className="text-[10px] md:text-xs font-bold text-red-500 md:text-zinc-400 hover:text-red-600 transition-all uppercase tracking-wider shrink-0 pt-1 px-2 py-1 -mr-2"
-                      >
-                        Delete
-                      </button>
-                    )}
+
+                    <p className="text-zinc-600 leading-relaxed whitespace-pre-wrap">
+                      {notice.message}
+                    </p>
                   </div>
-                  
-                  <p className="text-zinc-600 leading-relaxed whitespace-pre-wrap">
-                    {notice.message}
-                  </p>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
         )}
       </div>

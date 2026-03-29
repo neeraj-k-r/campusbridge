@@ -17,6 +17,7 @@ import MyRegistrations from "./pages/MyRegistrations";
 import MyEvents from "./pages/MyEvents";
 import Account from "./pages/Account";
 import Complaints from "./pages/Complaints";
+import ComplaintPanel from "./pages/ComplaintPanel"; // <-- Added Import
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import NoticeBoard from "./pages/NoticeBoard";
 import CampusConnect from "./pages/CampusConnect";
@@ -146,6 +147,13 @@ function AppContent({ user, profile, handleAcceptPolicy }) {
               path="/complaints"
               element={user ? <Complaints profile={profile} /> : <Navigate to="/login" />}
             />
+
+            {/* 🔥 NEW: Complaint Panel Route 🔥 */}
+            <Route
+              path="/panel"
+              element={user && (profile?.isPanelMember || profile?.email === "campusbridgeofficials@gmail.com") ? <ComplaintPanel profile={profile} /> : <Navigate to="/dashboard" />}
+            />
+
             <Route
               path="/notices"
               element={user ? <NoticeBoard profile={profile} /> : <Navigate to="/login" />}

@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Ticket,
   User,
+  Users, // <-- Added Users icon for the Panel Hub
   ListChecks,
   MessageSquareWarning,
   Clock,
@@ -19,7 +20,7 @@ import {
   GraduationCap,
   HelpCircle,
   Bus,
-  BookOpen // <-- Added BookOpen icon for the Tutor Section
+  BookOpen
 } from "lucide-react";
 import { useNotifications } from "../context/NotificationContext";
 import NotificationsPanel from "./NotificationsPanel";
@@ -126,6 +127,18 @@ export default function Navbar({ user, profile }) {
                     <MessageSquareWarning size={20} />
                     <span className="text-sm font-medium">Complaints</span>
                   </Link>
+
+                  {/* 🔥 NEW: PANEL HUB LINK (DESKTOP) 🔥 */}
+                  {(profile.isPanelMember || profile.email === "campusbridgeofficials@gmail.com") && (
+                    <Link
+                      to="/panel"
+                      className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-lg transition-all flex items-center gap-2"
+                      title="Panel Hub"
+                    >
+                      <Users size={20} />
+                      <span className="text-sm font-medium">Panel Hub</span>
+                    </Link>
+                  )}
 
                   <Link
                     to="/notices"
@@ -371,6 +384,18 @@ export default function Navbar({ user, profile }) {
                         <MessageSquareWarning size={24} />
                         <span className="font-bold">Complaints</span>
                       </Link>
+
+                      {/* 🔥 NEW: PANEL HUB LINK (MOBILE) 🔥 */}
+                      {(profile.isPanelMember || profile.email === "campusbridgeofficials@gmail.com") && (
+                        <Link
+                          to="/panel"
+                          onClick={() => setIsMenuOpen(false)}
+                          className="flex items-center gap-4 p-4 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 rounded-2xl transition-all"
+                        >
+                          <Users size={24} />
+                          <span className="font-bold">Panel Hub</span>
+                        </Link>
+                      )}
 
                       <Link
                         to="/notices"

@@ -3,7 +3,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import { Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { Calendar, MapPin, Users, ArrowRight, Search, Sparkles } from "lucide-react";
+import { Calendar, MapPin, Search, Sparkles, ArrowRight } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "../lib/utils";
 
@@ -26,7 +26,7 @@ export default function Dashboard({ profile }) {
           id: doc.id,
           ...doc.data()
         }));
-        
+
         // Sort on client side
         eventsData.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         setEvents(eventsData);
@@ -57,10 +57,10 @@ export default function Dashboard({ profile }) {
 
   const filteredEvents = events.filter(event => {
     // 1. Search Filter
-    const matchesSearch = 
+    const matchesSearch =
       event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       event.location.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     if (!matchesSearch) return false;
 
     // 2. Department Filter (Only for students)
@@ -99,7 +99,7 @@ export default function Dashboard({ profile }) {
       <section className="relative bg-zinc-900 rounded-3xl p-8 md:p-12 overflow-hidden shadow-2xl shadow-zinc-900/20">
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1541339907198-e08756dedf3f?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-zinc-900 via-zinc-900/80 to-transparent"></div>
-        
+
         <div className="relative z-10 max-w-2xl space-y-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -109,18 +109,18 @@ export default function Dashboard({ profile }) {
             <Sparkles size={12} className="text-emerald-400" />
             <span>Campus Life</span>
           </motion.div>
-          
-          <motion.h1 
+
+          <motion.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             className="text-4xl md:text-6xl font-serif font-bold text-white leading-tight"
           >
-            Discover your next <br/>
+            Discover your next <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-200">great experience</span>
           </motion.h1>
-          
-          <motion.p 
+
+          <motion.p
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -129,7 +129,7 @@ export default function Dashboard({ profile }) {
             Join workshops, seminars, and cultural fests happening right now on the SNMIMT campus.
           </motion.p>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
@@ -161,8 +161,8 @@ export default function Dashboard({ profile }) {
           </div>
           <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
             {myEvents.slice(0, 4).map((event) => (
-              <Link 
-                key={event.id} 
+              <Link
+                key={event.id}
                 to={`/event/${event.id}`}
                 className="flex-shrink-0 w-64 bg-white border border-zinc-200 rounded-2xl p-4 hover:shadow-md transition-all group"
               >
@@ -174,8 +174,8 @@ export default function Dashboard({ profile }) {
                   <span className="text-[10px] text-zinc-500 font-medium uppercase">{formatDate(event.date)}</span>
                   <span className={cn(
                     "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider",
-                    event.status === "approved" ? "bg-emerald-50 text-emerald-600" : 
-                    event.status === "rejected" ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"
+                    event.status === "approved" ? "bg-emerald-50 text-emerald-600" :
+                      event.status === "rejected" ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"
                   )}>
                     {event.status}
                   </span>
@@ -239,7 +239,7 @@ export default function Dashboard({ profile }) {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="p-6 flex-1 flex flex-col">
                     <div className="mb-4">
                       <h3 className="text-xl font-bold text-zinc-900 mb-2 line-clamp-2 group-hover:text-emerald-600 transition-colors leading-tight">
@@ -249,7 +249,7 @@ export default function Dashboard({ profile }) {
                         {event.description ? event.description.replace(/[#*`]/g, '') : "No description available."}
                       </p>
                     </div>
-                    
+
                     <div className="mt-auto pt-6 border-t border-zinc-100 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-bold text-emerald-600">
@@ -259,14 +259,19 @@ export default function Dashboard({ profile }) {
                           {event.hostName || "Unknown Host"}
                         </span>
                       </div>
-                      
+
+                      {/* 🔥 FIXED STATUS LOGIC INTEGRATED HERE 🔥 */}
                       <div className={cn(
                         "flex items-center gap-1.5 text-sm font-bold transition-colors",
-                        event.capacity && event.registeredCount >= event.capacity 
-                          ? "text-red-500" 
+                        (event.capacity && event.registeredCount >= event.capacity) || event.registrationClosed || event.status === "completed"
+                          ? "text-red-500"
                           : "text-zinc-900 group-hover:text-emerald-600"
                       )}>
-                        {event.capacity && event.registeredCount >= event.capacity ? (
+                        {event.status === "completed" ? (
+                          <>Event Ended</>
+                        ) : event.registrationClosed ? (
+                          <>Registration Closed</>
+                        ) : event.capacity && event.registeredCount >= event.capacity ? (
                           <>Sold Out</>
                         ) : (
                           <>

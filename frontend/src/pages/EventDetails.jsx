@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import jsPDF from "jspdf"; // Fixed import
+import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
   doc,
@@ -167,13 +167,12 @@ export default function EventDetails({ profile }) {
   const handleRegister = async () => {
     if (!id || !profile || !event) return;
 
-    // STRICT CHECK: Prevent registration if the event is closed, completed, or the date has passed
     const eventDate = new Date(event.date);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const isPastEvent = eventDate.getTime() < today.getTime();
 
-    if (event.registrationClosed || event.status === "completed" || isPastEvent) {
+    if (event.registrationClosed === true || event.status === "completed" || isPastEvent) {
       toast.error("Registration for this event is closed.");
       return;
     }
@@ -299,14 +298,12 @@ export default function EventDetails({ profile }) {
         return;
       }
 
-      // --- TIMESTAMP VALIDATION (Screenshot Prevention) ---
-      const THRESHOLD = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const THRESHOLD = 5 * 60 * 1000;
       const now = Date.now();
       if (now - decoded.timestamp > THRESHOLD) {
         toast.error("Ticket expired! Please refresh your pass. (Screenshots are not allowed)");
         return;
       }
-      // ----------------------------------------------------
 
       const q = query(
         collection(db, "registrations"),
@@ -484,10 +481,6 @@ export default function EventDetails({ profile }) {
     }
   };
 
-  // ==========================================
-  // RENDER HELPERS
-  // ==========================================
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
@@ -501,14 +494,19 @@ export default function EventDetails({ profile }) {
 
   if (!event) return null;
 
-  const isHost = profile?.uid === event.hostId;
+  const isDeveloper = profile?.email === "campusbridgeofficials@gmail.com";
+  const isHost = profile?.uid === event.hostId || isDeveloper;
   const isStudent = profile?.role?.toLowerCase() === 'student';
 
-  // Calculate if the event date has passed
   const eventDateObj = new Date(event.date);
   const todayObj = new Date();
   todayObj.setHours(0, 0, 0, 0);
   const isPastEvent = eventDateObj.getTime() < todayObj.getTime();
+
+  // Filter out pending/rejected users from the public list so it looks cleaner
+  const visibleAttendees = isHost
+    ? attendees
+    : attendees.filter(a => a.status === "approved" || a.attended);
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -594,7 +592,7 @@ export default function EventDetails({ profile }) {
             )}
           </div>
 
-          {/* Attendees / Guest List */}
+          {/* 🔥 FULL PUBLIC GUEST LIST 🔥 */}
           <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 md:p-10 shadow-sm">
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-2xl font-bold text-zinc-900 flex items-center gap-3">
@@ -602,18 +600,18 @@ export default function EventDetails({ profile }) {
                 Guest List
               </h3>
               <span className="bg-zinc-100 text-zinc-600 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border border-zinc-200">
-                {attendees.length} Registered
+                {visibleAttendees.length} Registered
               </span>
             </div>
 
-            {attendees.length === 0 ? (
+            {visibleAttendees.length === 0 ? (
               <div className="text-center py-12 bg-zinc-50 rounded-2xl border border-zinc-100 border-dashed">
                 <Users className="mx-auto text-zinc-300 mb-3" size={32} />
                 <p className="text-zinc-500 font-medium">Be the first to register!</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {attendees.map((attendee, index) => (
+                {visibleAttendees.map((attendee, index) => (
                   <div key={index} className="flex flex-col gap-3 p-4 bg-white rounded-2xl border border-zinc-100 hover:border-zinc-300 hover:shadow-md transition-all">
                     <div className="flex items-center gap-4">
                       <div className={cn(
@@ -631,17 +629,18 @@ export default function EventDetails({ profile }) {
                           <span className="font-medium bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100 truncate max-w-[100px]">
                             {attendee.collegeStudentId || "Student"}
                           </span>
+
                           {attendee.attended && (
                             <span className="text-emerald-600 flex items-center gap-1 font-bold">
                               <CheckCircle2 size={12} /> Attended
                             </span>
                           )}
-                          {attendee.status === "pending" && (
+                          {isHost && attendee.status === "pending" && (
                             <span className="text-amber-600 flex items-center gap-1 font-bold">
                               <Clock size={12} /> Pending
                             </span>
                           )}
-                          {attendee.status === "rejected" && (
+                          {isHost && attendee.status === "rejected" && (
                             <span className="text-red-600 flex items-center gap-1 font-bold">
                               <XCircle size={12} /> Rejected
                             </span>
@@ -650,7 +649,6 @@ export default function EventDetails({ profile }) {
                       </div>
                     </div>
 
-                    {/* ALWAYS VISIBLE Host Approval Controls with Text */}
                     {isHost && attendee.status === "pending" && (
                       <div className="flex gap-2 pt-2 border-t border-zinc-50">
                         <button
@@ -695,12 +693,12 @@ export default function EventDetails({ profile }) {
                       onClick={handleToggleRegistration}
                       className={cn(
                         "w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all border shadow-sm",
-                        event.registrationClosed
+                        event.registrationClosed === true
                           ? "bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-100"
                           : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100"
                       )}
                     >
-                      {event.registrationClosed ? (
+                      {event.registrationClosed === true ? (
                         <>
                           <Unlock size={20} />
                           Open Registration
@@ -715,7 +713,7 @@ export default function EventDetails({ profile }) {
                   )}
 
                   {/* Download Attendance */}
-                  {event.registrationClosed && (
+                  {event.registrationClosed === true && (
                     <button
                       onClick={handleDownloadAttendance}
                       className="w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-600/20"
@@ -936,7 +934,7 @@ export default function EventDetails({ profile }) {
                     <CheckCircle2 size={16} />
                     Event has ended
                   </div>
-                ) : event.registrationClosed ? (
+                ) : event.registrationClosed === true ? (
                   <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-amber-700 text-sm font-bold flex items-center gap-3">
                     <Lock size={16} />
                     Registration Closed

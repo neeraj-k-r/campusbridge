@@ -9,7 +9,7 @@ export default function QRScanner({ onScan }) {
 
   useEffect(() => {
     let isMounted = true;
-    
+
     const startScanner = async () => {
       try {
         // Wait for the DOM element to be available
@@ -25,14 +25,29 @@ export default function QRScanner({ onScan }) {
           throw new Error("No camera found");
         }
 
-        const cameraId = devices[0].id;
-        
+        // 🔥 NEW FEATURE: Find the Back Camera 🔥
+        let selectedCameraId = devices[0].id; // Fallback to first camera
+
+        const backCamera = devices.find(device =>
+          device.label.toLowerCase().includes("back") ||
+          device.label.toLowerCase().includes("rear") ||
+          device.label.toLowerCase().includes("environment")
+        );
+
+        if (backCamera) {
+          selectedCameraId = backCamera.id;
+        } else if (devices.length > 1) {
+          // On many mobile devices, if labels are empty, the last device is the back camera
+          selectedCameraId = devices[devices.length - 1].id;
+        }
+
         // Create instance
         const scanner = new Html5Qrcode(containerId);
         scannerRef.current = scanner;
 
+        // Start scanning with the selected camera
         await scanner.start(
-          cameraId,
+          selectedCameraId,
           {
             fps: 10,
             qrbox: { width: 250, height: 250 },
@@ -44,7 +59,7 @@ export default function QRScanner({ onScan }) {
             }
           },
           (errorMessage) => {
-            // ignore errors
+            // ignore constant read errors
           }
         );
 
@@ -62,7 +77,7 @@ export default function QRScanner({ onScan }) {
         if (isMounted) {
           // Only set error if it's not a "stop() called" error
           if (err?.name !== "Html5QrcodeError") {
-             setError(err.message || "Failed to start camera");
+            setError(err.message || "Failed to start camera");
           }
         }
       }
@@ -78,9 +93,9 @@ export default function QRScanner({ onScan }) {
       clearTimeout(timer);
       if (scannerRef.current) {
         scannerRef.current.stop().then(() => {
-            scannerRef.current.clear();
+          scannerRef.current.clear();
         }).catch(err => {
-            console.warn("Failed to stop scanner", err);
+          console.warn("Failed to stop scanner", err);
         });
       }
     };

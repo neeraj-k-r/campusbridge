@@ -182,17 +182,17 @@ async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
 }
 
 // 🔥 THE NEW FLIPKART-STYLE TRACKER 🔥
-const ComplaintTracker = ({ status, rejected }) => {
+const ComplaintTracker = ({ status, rejected, isAutoEscalated }) => {
   let currentStep = 0;
   if (rejected) currentStep = -1; // Error state
-  else if (status === "pending") currentStep = 0;
-  else if (status === "verified") currentStep = 1;
+  else if (status === "pending" && !isAutoEscalated) currentStep = 0;
+  else if (status === "verified" || isAutoEscalated) currentStep = 1; // Treat auto-escalation like verified
   else if (status === "in-progress") currentStep = 2;
   else if (status === "resolved") currentStep = 3;
 
   const steps = [
     { label: "Submitted" },
-    { label: "Panel Verified" },
+    { label: isAutoEscalated ? "Auto-Escalated" : "Panel Verified" },
     { label: "In Progress" },
     { label: "Resolved" }
   ];
@@ -212,7 +212,7 @@ const ComplaintTracker = ({ status, rejected }) => {
         {steps.map((step, idx) => {
           const isCompleted = idx < currentStep || (idx === currentStep && currentStep === 3);
           const isActive = idx === currentStep && !rejected;
-          const isError = idx === 0 && rejected; // Show error on first node if rejected before processing
+          const isError = idx === 0 && rejected;
 
           return (
             <div key={idx} className="relative z-10 flex flex-col items-center">
@@ -1051,7 +1051,11 @@ export default function Complaints({ profile }) {
                   )}
 
                   {/* 🔥 The New Progress Tracker 🔥 */}
-                  <ComplaintTracker status={complaint.status} rejected={complaint.status === "rejected"} />
+                  <ComplaintTracker
+                    status={complaint.status}
+                    rejected={complaint.status === "rejected"}
+                    isAutoEscalated={complaint.status === "pending" && (Date.now() - (complaint.createdAt?.toMillis?.() || Date.now()) > 24 * 60 * 60 * 1000)}
+                  />
 
                   <div className="flex items-center gap-6 pt-2 border-t border-zinc-50">
                     <button

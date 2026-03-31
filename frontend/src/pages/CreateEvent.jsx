@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, addDoc, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { generateEventDescription, generateEventPoster } from "../services/gemini";
 import { toast } from "react-hot-toast";
@@ -248,6 +248,8 @@ export default function CreateEvent({ profile }) {
 
         createdAt: Date.now(),
         registeredCount: 0,
+        // 🔥 FIX: Added registrationClosed default field 🔥
+        registrationClosed: false // Default open
       };
 
       if (profile.studentId) {

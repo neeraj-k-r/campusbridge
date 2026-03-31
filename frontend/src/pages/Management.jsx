@@ -124,12 +124,27 @@ export default function Management({ profile }) {
       (error) => console.error("Events listener error:", error)
     );
 
-    // 🔥 NEW: Fetch Verified Complaints for Principal 🔥
+    // 🔥 SMART COMPLAINT FETCHING: Catches Verified AND Auto-Escalated Complaints
     let unsubscribeComplaints = () => { };
     if (isPrincipal) {
-      const qComplaints = query(collection(db, "complaints"), where("status", "==", "verified"));
+      const qComplaints = query(collection(db, "complaints"), where("status", "in", ["pending", "verified"]));
       unsubscribeComplaints = onSnapshot(qComplaints, (snapshot) => {
-        setVerifiedComplaints(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        const COMPLAINT_TIMEOUT = 24 * 60 * 60 * 1000; // 24 Hours
+        const now = Date.now();
+
+        const validComplaints = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => {
+          if (c.status === "verified") return true;
+          if (c.status === "pending") {
+            // Check if 24 hours have passed
+            const createdTime = c.createdAt?.toMillis?.() || now;
+            return (now - createdTime) > COMPLAINT_TIMEOUT;
+          }
+          return false;
+        });
+
+        // Sort by newest
+        validComplaints.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+        setVerifiedComplaints(validComplaints);
       });
     }
 
@@ -351,7 +366,6 @@ export default function Management({ profile }) {
     }
   };
 
-  // 🔥 NEW: Action Handler for Complaints 🔥
   const handleComplaintAction = async (complaintId, newStatus) => {
     try {
       await updateDoc(doc(db, "complaints", complaintId), { status: newStatus });
@@ -758,11 +772,7 @@ export default function Management({ profile }) {
         {hasManagementAccess && (
           <div className="flex flex-wrap gap-4 pb-4 md:pb-0">
             {isDeveloper && (
-              <button
-                onClick={syncCapacities}
-                disabled={loading}
-                className="bg-zinc-900 text-white px-4 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider hover:bg-zinc-800 transition-all flex items-center gap-2 disabled:opacity-50"
-              >
+              <button onClick={syncCapacities} disabled={loading} className="bg-zinc-900 text-white px-4 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider hover:bg-zinc-800 transition-all flex items-center gap-2 disabled:opacity-50">
                 {loading ? <Loader2 className="animate-spin" size={16} /> : "Sync Counts"}
               </button>
             )}
@@ -773,13 +783,9 @@ export default function Management({ profile }) {
             {isPrincipal && (
               <div className="bg-red-50 px-4 py-3 rounded-2xl border border-red-100 text-center min-w-[80px] shrink-0">
                 <div className="text-2xl font-bold text-red-600 mb-1">{verifiedComplaints.length}</div>
-                <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Verified Complaints</div>
+                <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Escalated Complaints</div>
               </div>
             )}
-            <div className="bg-zinc-50 px-4 py-3 rounded-2xl border border-zinc-100 text-center min-w-[80px] shrink-0">
-              <div className="text-2xl font-bold text-zinc-900 mb-1">{capacities.length}</div>
-              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Depts</div>
-            </div>
           </div>
         )}
       </header>
@@ -790,11 +796,8 @@ export default function Management({ profile }) {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
               <AlertCircle className="text-red-500" size={24} />
-              Panel-Verified Complaints
+              Action Required: Escalated Complaints
             </h2>
-            <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border border-red-200">
-              Action Required
-            </span>
           </div>
           <div className="grid gap-4">
             <AnimatePresence mode="popLayout">
@@ -803,6 +806,8 @@ export default function Management({ profile }) {
                 const agreeCount = Object.values(votes).filter(v => v === "agree").length;
                 const disagreeCount = Object.values(votes).filter(v => v === "disagree").length;
                 const neitherCount = Object.values(votes).filter(v => v === "neither").length;
+
+                const isAutoEscalated = complaint.status === "pending";
 
                 return (
                   <motion.div
@@ -824,6 +829,16 @@ export default function Management({ profile }) {
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border text-emerald-600 bg-emerald-50 border-emerald-100">
                               Real: {complaint.authorRealName}
                             </span>
+                            {isAutoEscalated && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border text-red-600 bg-red-50 border-red-100 flex items-center gap-1">
+                                <Clock size={10} /> Auto-Escalated (Time Expired)
+                              </span>
+                            )}
+                            {!isAutoEscalated && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border text-indigo-600 bg-indigo-50 border-indigo-100 flex items-center gap-1">
+                                <ShieldCheck size={10} /> Verified by Panel
+                              </span>
+                            )}
                           </div>
                           <span className="text-[10px] text-zinc-400">
                             {complaint.createdAt?.toDate ? format(complaint.createdAt.toDate(), "MMM d, yyyy h:mm a") : ""}
@@ -941,6 +956,7 @@ export default function Management({ profile }) {
             </section>
           )}
 
+          {/* 🔥 USER DIRECTORY WITH PANEL HEAD LOGIC 🔥 */}
           {hasManagementAccess && (
             <section className="bg-white border border-zinc-200 rounded-[2.5rem] p-8 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -959,7 +975,7 @@ export default function Management({ profile }) {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+              <div className="grid grid-cols-1 gap-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                 {allUsers
                   .filter(u =>
                     u.displayName?.toLowerCase().includes(userSearch.toLowerCase()) ||
@@ -968,70 +984,69 @@ export default function Management({ profile }) {
                     u.facultyId?.toLowerCase().includes(userSearch.toLowerCase())
                   )
                   .map(u => (
-                    <div key={u.id} className="flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group hover:border-emerald-200 transition-all">
+                    <div key={u.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group hover:border-emerald-200 transition-all gap-4">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-10 h-10 rounded-xl bg-white border border-zinc-200 flex items-center justify-center font-bold text-zinc-400 shrink-0">
-                          {u.photoURL ? (
-                            <img src={u.photoURL} alt="" className="w-full h-full object-cover rounded-xl" />
-                          ) : (
-                            u.displayName?.[0]
-                          )}
+                          {u.photoURL ? <img src={u.photoURL} alt="" className="w-full h-full object-cover rounded-xl" /> : u.displayName?.[0]}
                         </div>
                         <div className="min-w-0">
                           <h4 className="font-bold text-sm text-zinc-900 uppercase truncate">{u.displayName}</h4>
                           <p className="text-[10px] text-zinc-500 truncate">{u.email}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={cn(
-                              "text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider",
-                              u.role === "alumni" ? "bg-amber-100 text-amber-700" :
-                                u.role === "faculty" ? "bg-purple-100 text-purple-700" :
-                                  u.role === "management" ? "bg-red-100 text-red-700" :
-                                    "bg-emerald-100 text-emerald-700"
-                            )}>
-                              {u.role}
-                            </span>
-                            {(u.studentId || u.facultyId) && (
-                              <span className="text-[8px] text-zinc-400 font-mono">ID: {u.studentId || u.facultyId}</span>
-                            )}
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className={cn("text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider", u.role === "alumni" ? "bg-amber-100 text-amber-700" : u.role === "faculty" ? "bg-purple-100 text-purple-700" : u.role === "management" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700")}>{u.role}</span>
+                            {u.isPanelMember && <span className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-indigo-100 text-indigo-700">Panel Member</span>}
+                            {u.isPanelHead && <span className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-yellow-100 text-yellow-700 border border-yellow-200 flex items-center gap-1"><Sparkles size={8} /> Panel Head</span>}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto flex-wrap justify-end">
+                        {/* MAKE PANEL MEMBER BUTTON */}
                         {isPrincipal && (
                           <button
                             onClick={async () => {
                               try {
-                                await updateDoc(doc(db, "users", u.id), { isPanelMember: !u.isPanelMember });
-                                toast.success(`${u.displayName} is ${!u.isPanelMember ? 'now' : 'no longer'} a Panel Member.`);
-                              } catch (error) {
-                                toast.error("Failed to update panel status.");
-                              }
+                                await updateDoc(doc(db, "users", u.id), {
+                                  isPanelMember: !u.isPanelMember,
+                                  isPanelHead: false // If removed from panel, also remove head status
+                                });
+                                toast.success(`${u.displayName} panel status updated.`);
+                              } catch (error) { toast.error("Failed to update panel status."); }
                             }}
                             className={cn(
                               "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border",
-                              u.isPanelMember
-                                ? "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
-                                : "bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100"
+                              u.isPanelMember ? "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100" : "bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100"
                             )}
                           >
                             {u.isPanelMember ? "Remove Panel" : "Make Panel"}
                           </button>
                         )}
+
+                        {/* MAKE PANEL HEAD BUTTON */}
+                        {isPrincipal && u.isPanelMember && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await updateDoc(doc(db, "users", u.id), { isPanelHead: !u.isPanelHead });
+                                toast.success(`${u.displayName} is ${!u.isPanelHead ? 'now' : 'no longer'} the Panel Head.`);
+                              } catch (error) { toast.error("Failed to update head status."); }
+                            }}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border flex items-center gap-1",
+                              u.isPanelHead ? "bg-yellow-50 text-yellow-600 border-yellow-200 hover:bg-yellow-100" : "bg-white text-zinc-500 border-zinc-200 hover:bg-zinc-100"
+                            )}
+                          >
+                            <Sparkles size={12} />
+                            {u.isPanelHead ? "Remove Head" : "Make Head"}
+                          </button>
+                        )}
+
                         <button
-                          onClick={() => setPasswordModal({
-                            isOpen: true,
-                            action: "delete_user",
-                            userToDelete: u,
-                            password: "",
-                            developerPassword: "",
-                            error: "",
-                            loading: false
-                          })}
-                          className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                          onClick={() => setPasswordModal({ isOpen: true, action: "delete_user", userToDelete: u, password: "", developerPassword: "", error: "", loading: false })}
+                          className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
                           title="Delete User Permanently"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
@@ -1781,6 +1796,7 @@ export default function Management({ profile }) {
           </motion.div>
         )}
       </AnimatePresence>
+
       <AnimatePresence>
         {passwordModal.isOpen && (
           <motion.div

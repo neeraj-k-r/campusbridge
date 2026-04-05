@@ -7,7 +7,7 @@ import {
   deleteUser,
   signOut // <-- ADDED: Needed to kick out deleted users
 } from "firebase/auth";
-import { doc, setDoc, getDoc, collection, query, getDocs, updateDoc, where } from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, query, getDocs, updateDoc, where, addDoc } from "firebase/firestore";
 import toast from "react-hot-toast";
 import { motion } from "motion/react";
 import { LogIn, UserPlus, GraduationCap, ShieldCheck, Users } from "lucide-react";
@@ -316,6 +316,59 @@ export default function Login() {
           }
 
           await setDoc(doc(db, "users", user.uid), userData);
+          
+          // NEW: REGISTRATION NOTIFICATIONS
+          try {
+            const idToken = await user.getIdToken();
+            let targetUids = [];
+            let notifTitle = "";
+            let notifMessage = "";
+
+            if (role === "student") {
+              const tq = query(collection(db, "users"), where("role", "==", "faculty"), where("isTutor", "==", true), where("department", "==", department), where("tutorOf", "==", yearOfJoin.toString()));
+              const tutorSnap = await getDocs(tq);
+              targetUids = tutorSnap.docs.map(d => d.id);
+              notifTitle = "New Student Verification";
+              notifMessage = `${displayName} (${finalStudentId}) has registered and requires approval.`;
+            } else if (role === "faculty") {
+              const hq = query(collection(db, "users"), where("role", "==", "management"), where("type", "==", "hod"), where("department", "==", department));
+              const hodSnap = await getDocs(hq);
+              targetUids = hodSnap.docs.map(d => d.id);
+              notifTitle = "New Faculty Verification";
+              notifMessage = `${displayName} (${facultyId}) has registered and requires approval.`;
+            }
+
+            if (targetUids.length > 0) {
+               await addDoc(collection(db, "notifications"), {
+                 title: notifTitle,
+                 message: notifMessage,
+                 link: "/management",
+                 recipients: targetUids,
+                 type: "INFO",
+                 senderId: "system",
+                 senderName: "System Alert",
+                 createdAt: Date.now(),
+                 isRead: false
+               });
+
+               fetch("/api/send-notification", {
+                 method: "POST",
+                 headers: {
+                   "Content-Type": "application/json",
+                   "Authorization": `Bearer ${idToken}`
+                 },
+                 body: JSON.stringify({
+                   title: notifTitle,
+                   message: notifMessage,
+                   link: "/management",
+                   recipients: targetUids
+                 })
+               }).catch(e => console.error("Push API failed:", e));
+            }
+          } catch (notifErr) {
+            console.error("Failed to notify authorities:", notifErr);
+          }
+
           toast.success("Account created successfully!");
 
         } catch (err) {

@@ -39,7 +39,6 @@ export default function Management({ profile }) {
   const [pendingManagers, setPendingManagers] = useState([]);
   const [capacities, setCapacities] = useState([]);
   const [ads, setAds] = useState([]);
-  // 🔥 NEW STATE: Verified Complaints from Panel 🔥
   const [verifiedComplaints, setVerifiedComplaints] = useState([]);
 
   const [loading, setLoading] = useState(true);
@@ -63,7 +62,6 @@ export default function Management({ profile }) {
   const [capacityType, setCapacityType] = useState("student");
   const [expandedCapacityId, setExpandedCapacityId] = useState(null);
 
-  // Ad Form State
   const [adTitle, setAdTitle] = useState("");
   const [adMessage, setAdMessage] = useState("");
   const [adUrl, setAdUrl] = useState("");
@@ -124,25 +122,22 @@ export default function Management({ profile }) {
       (error) => console.error("Events listener error:", error)
     );
 
-    // 🔥 SMART COMPLAINT FETCHING: Catches Verified AND Auto-Escalated Complaints
     let unsubscribeComplaints = () => { };
     if (isPrincipal) {
       const qComplaints = query(collection(db, "complaints"), where("status", "in", ["pending", "verified"]));
       unsubscribeComplaints = onSnapshot(qComplaints, (snapshot) => {
-        const COMPLAINT_TIMEOUT = 24 * 60 * 60 * 1000; // 24 Hours
+        const COMPLAINT_TIMEOUT = 24 * 60 * 60 * 1000;
         const now = Date.now();
 
         const validComplaints = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => {
           if (c.status === "verified") return true;
           if (c.status === "pending") {
-            // Check if 24 hours have passed
             const createdTime = c.createdAt?.toMillis?.() || now;
             return (now - createdTime) > COMPLAINT_TIMEOUT;
           }
           return false;
         });
 
-        // Sort by newest
         validComplaints.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
         setVerifiedComplaints(validComplaints);
       });
@@ -607,6 +602,9 @@ export default function Management({ profile }) {
     }
   };
 
+  // -------------------------------------------------------------
+  // 🔥 SECURED USER DELETION FUNCTION 🔥
+  // -------------------------------------------------------------
   const executeDeleteUser = async (userToDelete) => {
     if (!userToDelete?.id) {
       toast.error("User ID is missing");
@@ -614,12 +612,21 @@ export default function Management({ profile }) {
     }
 
     try {
-      const response = await fetch("/api/delete-user", {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("You must be logged in to do this.");
+      }
+
+      const idToken = await currentUser.getIdToken();
+
+      const response = await fetch("https://campusbridge-v9ba.onrender.com/api/delete-user", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`
+        },
         body: JSON.stringify({
-          uid: userToDelete.id,
-          developerEmail: profile.email
+          uid: userToDelete.id
         })
       });
 
@@ -632,6 +639,7 @@ export default function Management({ profile }) {
       toast.error("Failed to delete user: " + error.message);
     }
   };
+  // -------------------------------------------------------------
 
   const executeEndBatch = async (cap) => {
     try {
@@ -790,7 +798,6 @@ export default function Management({ profile }) {
         )}
       </header>
 
-      {/* 🔥 NEW SECTION: VERIFIED COMPLAINTS FOR PRINCIPAL 🔥 */}
       {isPrincipal && verifiedComplaints.length > 0 && (
         <section className="bg-red-50/50 border border-red-100 rounded-[2.5rem] p-8">
           <div className="flex items-center justify-between mb-6">
@@ -956,7 +963,6 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {/* 🔥 USER DIRECTORY WITH PANEL HEAD LOGIC 🔥 */}
           {hasManagementAccess && (
             <section className="bg-white border border-zinc-200 rounded-[2.5rem] p-8 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -1001,14 +1007,13 @@ export default function Management({ profile }) {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto flex-wrap justify-end">
-                        {/* MAKE PANEL MEMBER BUTTON */}
                         {isPrincipal && (
                           <button
                             onClick={async () => {
                               try {
                                 await updateDoc(doc(db, "users", u.id), {
                                   isPanelMember: !u.isPanelMember,
-                                  isPanelHead: false // If removed from panel, also remove head status
+                                  isPanelHead: false
                                 });
                                 toast.success(`${u.displayName} panel status updated.`);
                               } catch (error) { toast.error("Failed to update panel status."); }
@@ -1022,7 +1027,6 @@ export default function Management({ profile }) {
                           </button>
                         )}
 
-                        {/* MAKE PANEL HEAD BUTTON */}
                         {isPrincipal && u.isPanelMember && (
                           <button
                             onClick={async () => {
@@ -1109,7 +1113,6 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {/* 🔥 RESTRICTED ADVERTISEMENT SECTION 🔥 */}
           {isDeveloper && (
             <section className="bg-zinc-900 rounded-[2.5rem] p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
@@ -1324,7 +1327,6 @@ export default function Management({ profile }) {
             </section>
           )}
 
-          {/* 🔥 EVENT APPROVAL PIPELINE 🔥 */}
           <section>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
@@ -1426,7 +1428,6 @@ export default function Management({ profile }) {
           </section>
         </div>
 
-        {/* Right Column: Capacity Management */}
         {hasManagementAccess && (
           <div className="space-y-8">
             <section className="bg-zinc-900 rounded-3xl p-8 text-white shadow-xl shadow-zinc-900/20 relative overflow-hidden">
@@ -1564,7 +1565,6 @@ export default function Management({ profile }) {
                     });
                   const isExpanded = expandedCapacityId === cap.id;
 
-                  // Ensure HODs only see edit buttons for their own department
                   const canEditCapacity = isDeveloper || isManagementStaff || (isHOD && cap.department?.toUpperCase() === hodDepartment);
 
                   return (

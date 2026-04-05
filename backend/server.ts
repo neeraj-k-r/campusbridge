@@ -10,11 +10,19 @@ import cors from "cors";
 
 dotenv.config();
 
-webpush.setVapidDetails(
-  'mailto:campusbridgeofficials@gmail.com',
-  process.env.VAPID_PUBLIC_KEY || "YOUR_PUBLIC_KEY",
-  process.env.VAPID_PRIVATE_KEY || "YOUR_PRIVATE_KEY"
-);
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  try {
+    webpush.setVapidDetails(
+      'mailto:campusbridgeofficials@gmail.com',
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+  } catch (error) {
+    console.error("⚠️ WARNING: Invalid VAPID keys provided in .env. Web push will not work.", (error as Error).message);
+  }
+} else {
+  console.warn("⚠️ WARNING: VAPID keys not found in .env. Web push notifications will not work.");
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -50,6 +58,29 @@ try {
 } catch (error) {
   console.error("Error initializing Firebase Admin:", error);
 }
+
+// ---------------------------------------------------------
+// NEW: Firebase Authentication Middleware
+// ---------------------------------------------------------
+const verifyFirebaseToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: "Unauthorized: Missing or invalid token." });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    req.user = decodedToken; // Attach user data to the request
+    next();
+  } catch (error) {
+    console.error("Token verification error:", error);
+    return res.status(403).json({ error: "Forbidden: Invalid or expired token." });
+  }
+};
+// ---------------------------------------------------------
 
 // Poll for new notifications (Fallback)
 let lastNotificationTime = Date.now();
@@ -97,7 +128,9 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
-  app.use(cors({ origin: '*' }));
+  const allowedOrigins = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : '*';
+  // SECURITY WARNING: In production, ensure process.env.FRONTEND_URL is set restrictively.
+  app.use(cors({ origin: allowedOrigins }));
   app.use(express.json());
 
   // API routes go here
@@ -105,11 +138,19 @@ async function startServer() {
     res.json({ status: "ok", message: "Backend is running" });
   });
 
-  // --- NEW INSTANT PUSH NOTIFICATION ENDPOINT ---
-  app.post("/api/send-notification", async (req, res) => {
+  // --- SECURED INSTANT PUSH NOTIFICATION ENDPOINT ---
+  app.post("/api/send-notification", verifyFirebaseToken, async (req, res) => {
     try {
       const { title, message, link, recipients } = req.body;
       if (!db) return res.status(500).json({ error: "Database not ready" });
+
+      const requestorEmail = req.user.email;
+
+      // Ensure only authorized emails can send notifications
+      const authorizedSenders = process.env.DEVELOPER_EMAILS ? process.env.DEVELOPER_EMAILS.toLowerCase().split(',') : ["campusbridgeofficials@gmail.com"];
+      if (!requestorEmail || !authorizedSenders.includes(requestorEmail.toLowerCase())) {
+        return res.status(403).json({ error: "Forbidden: You do not have permission to send push notifications." });
+      }
 
       let targetTokens = [];
       const safeRecipients = recipients || [];
@@ -160,24 +201,29 @@ async function startServer() {
       res.status(200).json({ success: true, response });
     } catch (error) {
       console.error("Error sending instant push notification:", error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: "An internal server error occurred while sending notifications." });
     }
   });
-  // --- END OF NEW ENDPOINT ---
 
+  // --- SECURED SECRET ROUTE ---
   app.post("/api/verify-secret", (req, res) => {
     const { role, secret } = req.body;
     const trimmedSecret = secret?.trim();
+    
+    if (!trimmedSecret) return res.json({ valid: false });
+
+    // IMPORTANT: Ensure you set these environment variables in your production environment!
+    // Otherwise fallback secrets are randomized so login will fail by default, securing the app.
     if (role === "management") {
-      const validSecret = (process.env.MANAGER_SECRET || "IAMMANAGER").trim();
+      const validSecret = (process.env.MANAGER_SECRET || Math.random().toString(36)).trim();
       return res.json({ valid: trimmedSecret === validSecret });
     }
     if (role === "faculty") {
-      const validSecret = (process.env.FACULTY_SECRET || "IAMFACULTY").trim();
+      const validSecret = (process.env.FACULTY_SECRET || Math.random().toString(36)).trim();
       return res.json({ valid: trimmedSecret === validSecret });
     }
     if (role === "developer") {
-      const validPassword = (process.env.DEVELOPER_PASSWORD || "DEVELOPER_PASSWORD").trim();
+      const validPassword = (process.env.DEVELOPER_PASSWORD || Math.random().toString(36)).trim();
       return res.json({ valid: trimmedSecret === validPassword });
     }
     res.json({ valid: false });
@@ -228,15 +274,20 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post(["/api/delete-user", "/api/delete-user/"], async (req, res) => {
-    const { uid, developerEmail } = req.body;
+  // --- SECURED DELETE USER ENDPOINT ---
+  app.post(["/api/delete-user", "/api/delete-user/"], verifyFirebaseToken, async (req, res) => {
+    const { uid } = req.body; // Notice developerEmail is removed from here
 
-    if (!uid || !developerEmail) {
-      return res.status(400).json({ error: "Missing required fields" });
+    if (!uid) {
+      return res.status(400).json({ error: "Missing required field: uid" });
     }
 
-    if (developerEmail.toLowerCase() !== "campusbridgeofficials@gmail.com") {
-      return res.status(401).json({ error: "Unauthorized request. Only developers can perform this action." });
+    const requestorEmail = req.user.email;
+
+    // Verify this specific user has developer privileges 
+    const authorizedSenders = process.env.DEVELOPER_EMAILS ? process.env.DEVELOPER_EMAILS.toLowerCase().split(',') : ["campusbridgeofficials@gmail.com"];
+    if (!requestorEmail || !authorizedSenders.includes(requestorEmail.toLowerCase())) {
+      return res.status(403).json({ error: "Forbidden: Only developers can perform this action." });
     }
 
     try {
@@ -248,7 +299,7 @@ async function startServer() {
       res.json({ success: true, deletedUser });
     } catch (error) {
       console.error("Error deleting user:", error);
-      res.status(500).json({ error: "Failed to delete user" });
+      res.status(500).json({ error: "An internal error occurred while trying to delete the user." });
     }
   });
 
@@ -258,7 +309,7 @@ async function startServer() {
 
   app.use((err, req, res, next) => {
     console.error("Global error handler caught:", err);
-    res.status(500).json({ error: err.message || "Internal Server Error" });
+    res.status(500).json({ error: "Internal Server Error" }); // Sanitized error message
   });
 
   const isProd = process.env.NODE_ENV === "production";

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { db, auth, messaging } from "../firebase";
-import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, arrayUnion, addDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, arrayUnion, addDoc, getDocs, deleteDoc, setDoc } from "firebase/firestore";
 import { toast } from "react-hot-toast";
 import { getToken } from "firebase/messaging";
 
@@ -33,8 +33,8 @@ export const NotificationProvider = ({ children, user, profile }) => {
         });
 
         if (token) {
-          // Store token in Firestore for backend to use
-          await updateDoc(doc(db, "users", uid), { fcmToken: token });
+          // Store token in Firestore for backend to use (using setDoc with merge to prevent "No document" crash)
+          await setDoc(doc(db, "users", uid), { fcmToken: token }, { merge: true });
         }
       } catch (error) {
         console.error("FCM registration error:", error);
@@ -173,23 +173,32 @@ export const NotificationProvider = ({ children, user, profile }) => {
     if (!profile) return;
 
     try {
-      // 1. Add to Firestore (Your existing code)
+      // 1. Add to Firestore
       await addDoc(collection(db, "notifications"), {
         ...notificationData,
-        senderId: uid || "system",  // <--- CHANGED THIS LINE
+        senderId: uid || "system",
         senderName: profile.displayName || "Admin",
         createdAt: Date.now(),
         isRead: false
       });
 
-      // 2. NEW: Trigger the background push notification!
-      // In development this hits localhost, in production it hits your real URL
-      const isLocal = window.location.hostname === "localhost";
-      // Inside NotificationContext.jsx
-      const BACKEND_URL = "https://campusbridge-v9ba.onrender.com/api/send-notification";
+      // 2. NEW SECURITY CHECK: Get the secure token for the current user
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        console.error("Cannot send push notification: No user logged in.");
+        return;
+      }
+      const idToken = await currentUser.getIdToken();
+
+      // 3. Trigger the background push notification!
+      const BACKEND_URL = "/api/send-notification";
       fetch(BACKEND_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // THIS IS THE NEW SECURITY HEADER REQUIRED BY YOUR BACKEND
+          "Authorization": `Bearer ${idToken}`
+        },
         body: JSON.stringify({
           title: notificationData.title,
           message: notificationData.message,

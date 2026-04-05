@@ -41,16 +41,24 @@ service cloud.firestore {
       );
     }
 
+    function isEventHost(eventId) {
+      let ev = get(/databases/$(database)/documents/events/$(eventId));
+      return ev != null && ev.data.hostId == request.auth.uid;
+    }
+
     // ==========================================
     // --- 2. COLLECTION RULES ---
     // ==========================================
 
     // USERS: Public read. Users create their own.
-    // Users can update themselves, OR Management can update them (for approvals).
+    // Users can update themselves (restricted fields), OR Management can update them (for approvals).
     match /users/{userId} {
       allow read: if true;
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && (request.auth.uid == userId || isManagement());
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'type', 'isTutor', 'department'])) ||
+        isManagement()
+      );
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isDeveloper());
     }
 
@@ -61,18 +69,19 @@ service cloud.firestore {
       allow update: if false; 
     }
     
-    // COMPLAINTS: Public read. Anyone logged in can create/update. Developer deletes.
+    // COMPLAINTS: Only creator or management can read. Anyone logged in can create, but only creator can update.
     match /complaints/{complaintId} {
-      allow read: if true;
-      allow create, update: if isAuthenticated(); 
+      allow read: if isManagement() || resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid; 
+      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid;
       allow delete: if isManagement() || resource.data.uid == request.auth.uid; 
     }
     
-    // DEPARTMENT CAPACITY: Public read. Logged in users update (to book tickets). 
+    // DEPARTMENT CAPACITY: Public read. Logged in users update (to book tickets, restricted to registeredCount only). 
     // Only Management can create or delete a whole department.
     match /departmentCapacity/{deptId} {
       allow read: if true;
-      allow update: if isAuthenticated(); 
+      allow update: if isAuthenticated() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalCapacity']); 
       allow create, delete: if isManagement();
     }
 
@@ -82,10 +91,11 @@ service cloud.firestore {
       allow create, update, delete: if isManagement();
     }
     
-    // EVENTS: Public read. Logged in users create/update. Only the Host or Dev deletes.
+    // EVENTS: Public read. Logged in users create/update their own. Only the Host or Dev deletes.
     match /events/{eventId} {
       allow read: if true;
-      allow create, update: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.hostId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.hostId == request.auth.uid || isManagement());
       allow delete: if isAuthenticated() && (resource.data.hostId == request.auth.uid || isManagement());
 
       match /feedback/{feedbackId} {
@@ -95,7 +105,13 @@ service cloud.firestore {
     
     // REGISTRATIONS (Tickets)
     match /registrations/{regId} {
-      allow read, create, update: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.studentId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        isEventHost(resource.data.eventId) || 
+        isManagement() ||
+        (resource.data.studentId == request.auth.uid && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'attended']))
+      );
       allow delete: if isManagement();
     }
 
